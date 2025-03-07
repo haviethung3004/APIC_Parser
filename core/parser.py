@@ -1,71 +1,90 @@
 import json
 
-class TenantConfigParser:
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.config = None
-        self.tenant = None
+def load_config(file_path):
+    """Load JSON configuration from file"""
+    with open(file_path, 'r') as f:
+        return json.load(f)
 
-    def load_config(self):
-        try:
-            with open(self.file_path, 'r') as f:
-                self.config = json.load(f)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load config: {e}")
 
-    def parse_config(self):
-        if not self.config:
-            raise RuntimeError("Config not loaded")
+def extract_object(node, target_class, result=None):
+    if result is None:
+        result = []
+    
+    # If node is a list, process each item
+    if isinstance(node, list):
+        for item in node:
+            extract_object(item, target_class, result)
+        return result
+        
+    # Process dictionary objects
+    if isinstance(node, dict):
+        for class_name, value in node.items():
+            if isinstance(value, dict):
+                # If this node matches the target class, add to results
+                if class_name == target_class:
+                    attributes = value.get('attributes', {})
+                    # children = value.get('children', [])
 
-        imdata = self.config.get('imdata', [])
-        if not imdata:
-            raise RuntimeError("No data found in config")
+                    entry = {
+                        "class": class_name,
+                        "attributes": attributes,
+                        "children": []
+                    }
+                    result.append(entry)
+                    
+                    # Add all children regardless of class
+                    children = value.get('children', [])
+                    if children:
+                        for child in children:
+                            for child_class, child_value in child.items():
+                                child_entry = {
+                                    "class": child_class,
+                                    "attributes": child_value.get('attributes', {}),
+                                    "children": []
+                                }
+                                
+                                # Recursively extract children of this child
+                                if child_value.get('children'):
+                                    # Extract all children recursively regardless of class
+                                    child_children = []
+                                    for grandchild in child_value.get('children'):
+                                        for gc_class, gc_value in grandchild.items():
+                                            gc_entry = {
+                                                "class": gc_class,
+                                                "attributes": gc_value.get('attributes', {}),
+                                                "children": []
+                                            }
+                                            # Process deeper children if they exist
+                                            if gc_value.get('children'):
+                                                extract_object(gc_value.get('children'), None, gc_entry['children'])
+                                            child_children.append(gc_entry)
+                                    
+                                    # print(child_children)
+                                    child_entry['children'] = child_children
+                                
+                                entry['children'].append(child_entry)
+                else:
+                    # Recursively process children even if current class doesn't match
+                    children = value.get('children', [])
+                    if children:
+                        for child in children:
+                            extract_object(child, target_class, result)
+    
+    return result        
 
-        # Find the tenant directly under imdata (no polUni hierarchy)
-        tenant_objects = [item for item in imdata if 'fvTenant' in item]
-        if len(tenant_objects) != 1:
-            raise RuntimeError(f"Expected 1 tenant, found {len(tenant_objects)}")
 
-        tenant_data = tenant_objects[0]['fvTenant']
-        self.tenant = {
-            'name': tenant_data['attributes']['name'],
-            'BDs': [],
-            'VRFs': [],
-            'L3Outs': []
-        }
 
-        # Parse tenant children
-        for child in tenant_data.get('children', []):
-            if 'fvBD' in child:
-                self.tenant['BDs'].append(child['fvBD']['attributes'])
-            elif 'fvCtx' in child:
-                self.tenant['VRFs'].append(child['fvCtx']['attributes'])
-            elif 'l3extOut' in child:
-                self.tenant['L3Outs'].append(child['l3extOut']['attributes'])
+if __name__ == "__main__":
+    config = load_config(r"C:\Users\dsu979\OneDrive - dynexo GmbH\Desktop\APIC\tn-Datacenter1.json")
+    
+    # Start from the root tenant object
+    tenant_node = config['imdata'][0]['fvTenant']["children"]
+    
+    # Extract all objects of class 'fvBD' (Bridge Domains)
+    bds = extract_object(tenant_node, 'fvAp')
+    print(bds)
 
-    @property
-    def bd_count(self):
-        return len(self.tenant['BDs']) if self.tenant else 0
-
-    @property
-    def vrf_count(self):
-        return len(self.tenant['VRFs']) if self.tenant else 0
-
-    @property
-    def l3out_count(self):
-        return len(self.tenant['L3Outs']) if self.tenant else 0
-
-# Usage example
-if __name__ == '__main__':
-    try:
-        parser = TenantConfigParser(r'C:\Users\dsu979\OneDrive - dynexo GmbH\Desktop\APIC\APIC_Parser\tn-Migrate1.json')
-        parser.load_config()
-        parser.parse_config()
-
-        print(f"Tenant Name: {parser.tenant['name']}")
-        print(f"BD Count: {parser.bd_count}")
-        print(f"VRF Count: {parser.vrf_count}")
-        print(f"L3Out Count: {parser.l3out_count}")
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    print(f"Found {len(bds)} Bridge Domains")
+    for bd in bds:  # Show first 2 as example
+        print(f"- Name: {bd['attributes']['name']}")
+        print(f"  Children: {[child['class'] for child in bd['children']]}")
