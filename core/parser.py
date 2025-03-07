@@ -2,71 +2,47 @@ import json
 
 class TenantConfigParser:
     def __init__(self, file_path):
-        """
-        Parser for single-tenant APIC configurations
-        :param file_path: Path to tenant-specific JSON configuration
-        """
         self.file_path = file_path
         self.config = None
-        self.tenant = None  # Will hold the single tenant's configuration
+        self.tenant = None
 
     def load_config(self):
-        """Load and validate JSON configuration"""
         try:
-            with open(self.file_path, 'r') as file:
-                self.config = json.load(file)
-        except FileNotFoundError:
-            raise Exception(f"Error: File '{self.file_path}' not found")
-        except json.JSONDecodeError:
-            raise Exception("Error: Invalid JSON format")
+            with open(self.file_path, 'r') as f:
+                self.config = json.load(f)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load config: {e}")
 
     def parse_config(self):
-        """Parse the tenant configuration"""
         if not self.config:
-            raise Exception("Configuration not loaded. Call load_config() first")
+            raise RuntimeError("Config not loaded")
 
-        # Navigate APIC's JSON structure
         imdata = self.config.get('imdata', [])
         if not imdata:
-            raise Exception("Empty configuration file")
+            raise RuntimeError("No data found in config")
 
-        pol_uni = imdata[0].get('polUni', {})
-        tenant_node = self._find_tenant_node(pol_uni)
+        # Find the tenant directly under imdata (no polUni hierarchy)
+        tenant_objects = [item for item in imdata if 'fvTenant' in item]
+        if len(tenant_objects) != 1:
+            raise RuntimeError(f"Expected 1 tenant, found {len(tenant_objects)}")
 
-        # Parse tenant information
-        self.tenant = self._parse_tenant_node(tenant_node)
-
-    def _find_tenant_node(self, pol_uni):
-        """Locate the single tenant node in configuration"""
-        children = pol_uni.get('children', [])
-        tenant_nodes = [child for child in children if 'fvTenant' in child]
-
-        if len(tenant_nodes) != 1:
-            raise Exception(f"Expected 1 tenant, found {len(tenant_nodes)}")
-        
-        return tenant_nodes[0]['fvTenant']
-
-    def _parse_tenant_node(self, tenant_data):
-        """Extract tenant information from configuration node"""
-        tenant_info = {
+        tenant_data = tenant_objects[0]['fvTenant']
+        self.tenant = {
             'name': tenant_data['attributes']['name'],
             'BDs': [],
             'VRFs': [],
             'L3Outs': []
         }
 
-        # Process all child objects
-        for obj in tenant_data.get('children', []):
-            if 'fvBD' in obj:
-                tenant_info['BDs'].append(obj['fvBD']['attributes'])
-            elif 'fvCtx' in obj:
-                tenant_info['VRFs'].append(obj['fvCtx']['attributes'])
-            elif 'l3extOut' in obj:
-                tenant_info['L3Outs'].append(obj['l3extOut']['attributes'])
+        # Parse tenant children
+        for child in tenant_data.get('children', []):
+            if 'fvBD' in child:
+                self.tenant['BDs'].append(child['fvBD']['attributes'])
+            elif 'fvCtx' in child:
+                self.tenant['VRFs'].append(child['fvCtx']['attributes'])
+            elif 'l3extOut' in child:
+                self.tenant['L3Outs'].append(child['l3extOut']['attributes'])
 
-        return tenant_info
-
-    # Properties for easy access
     @property
     def bd_count(self):
         return len(self.tenant['BDs']) if self.tenant else 0
@@ -78,16 +54,18 @@ class TenantConfigParser:
     @property
     def l3out_count(self):
         return len(self.tenant['L3Outs']) if self.tenant else 0
-    
-if __name__ == "__main__":
-    parser = TenantConfigParser(r'C:\Users\dsu979\OneDrive - dynexo GmbH\Desktop\APIC\APIC_Parser\tn-Migrate1.json')
-    parser.load_config()
-    parser.parse_config()
 
-    print(f"Tenant Name: {parser.tenant['name']}")
-    print(f"BD Count: {parser.bd_count}")
-    print(f"VRF Count: {parser.vrf_count}")
+# Usage example
+if __name__ == '__main__':
+    try:
+        parser = TenantConfigParser(r'C:\Users\dsu979\OneDrive - dynexo GmbH\Desktop\APIC\APIC_Parser\tn-Migrate1.json')
+        parser.load_config()
+        parser.parse_config()
 
-    # Access specific BD attributes
-    for bd in parser.tenant['BDs']:
-        print(f"BD Name: {bd['name']}, ARP Flood: {bd.get('arpFlood', 'disabled')}")
+        print(f"Tenant Name: {parser.tenant['name']}")
+        print(f"BD Count: {parser.bd_count}")
+        print(f"VRF Count: {parser.vrf_count}")
+        print(f"L3Out Count: {parser.l3out_count}")
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
