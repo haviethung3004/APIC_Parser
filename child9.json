@@ -1,0 +1,110 @@
+{
+  "fvBD": {
+    "attributes": {
+      "OptimizeWanBandwidth": "no",
+      "annotation": "",
+      "arpFlood": "no",
+      "descr": "ISE-TransNet",
+      "enableRogueExceptMac": "no",
+      "epClear": "no",
+      "epMoveDetectMode": "",
+      "hostBasedRouting": "no",
+      "intersiteBumTrafficAllow": "no",
+      "intersiteL2Stretch": "no",
+      "ipLearning": "yes",
+      "ipv6McastAllow": "no",
+      "limitIpLearnToSubnets": "yes",
+      "llAddr": "::",
+      "mac": "00:22:BD:F8:19:FF",
+      "mcastARPDrop": "no",
+      "mcastAllow": "no",
+      "multiDstPktAct": "bd-flood",
+      "name": "BD_718",
+      "nameAlias": "",
+      "ownerKey": "",
+      "ownerTag": "",
+      "serviceBdRoutingDisable": "no",
+      "type": "regular",
+      "unicastRoute": "yes",
+      "unkMacUcastAct": "proxy",
+      "unkMcastAct": "flood",
+      "userdom": ":all:",
+      "v6unkMcastAct": "flood",
+      "vmac": "not-applicable"
+    },
+    "children": [
+      {
+        "fvSubnet": {
+          "attributes": {
+            "annotation": "",
+            "ctrl": "nd",
+            "descr": "",
+            "ip": "172.20.31.65/29",
+            "ipDPLearning": "enabled",
+            "name": "",
+            "nameAlias": "",
+            "preferred": "no",
+            "scope": "public",
+            "userdom": ":all:",
+            "virtual": "no"
+          }
+        }
+      },
+      {
+        "fvRsMldsn": {
+          "attributes": {
+            "annotation": "",
+            "tnMldSnoopPolName": "",
+            "userdom": "all"
+          }
+        }
+      },
+      {
+        "fvRsIgmpsn": {
+          "attributes": {
+            "annotation": "",
+            "tnIgmpSnoopPolName": "",
+            "userdom": "all"
+          }
+        }
+      },
+      {
+        "fvRsCtx": {
+          "attributes": {
+            "annotation": "",
+            "tnFvCtxName": "VRF_intern",
+            "userdom": "all"
+          }
+        }
+      },
+      {
+        "fvRsBdToEpRet": {
+          "attributes": {
+            "annotation": "",
+            "resolveAct": "resolve",
+            "tnFvEpRetPolName": "",
+            "userdom": "all"
+          }
+        }
+      },
+      {
+        "fvRsBDToOut": {
+          "attributes": {
+            "annotation": "",
+            "tnL3extOutName": "FRW18_4000",
+            "userdom": ":all:"
+          }
+        }
+      },
+      {
+        "fvRsBDToNdP": {
+          "attributes": {
+            "annotation": "",
+            "tnNdIfPolName": "",
+            "userdom": "all"
+          }
+        }
+      }
+    ]
+  }
+}
