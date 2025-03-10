@@ -75,6 +75,73 @@ class ACIConfigParser:
             
         return ACIObjectExtractor.extract_object(self.config, class_name)
     
+    def set_object_status(self, status_value: str, object_path: Optional[List[str]] = None) -> bool:
+        """
+        Set the status attribute for an object in the configuration
+        
+        Args:
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            object_path: Path to the object to update (if None, updates root object)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            ACIObjectExtractor.set_object_status(self.config, status_value, object_path)
+            # Refresh the extracted objects
+            self.objects = ACIObjectExtractor.extract_all_objects(self.config)
+            return True
+        except Exception as e:
+            print(f"Error setting object status: {e}")
+            return False
+    
+    def set_child_status(self, child_index: int, status_value: str) -> bool:
+        """
+        Set the status for a specific child by index
+        
+        Args:
+            child_index: Index of the child to update (0-based)
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            result = ACIObjectExtractor.set_status_for_child(self.config, child_index, status_value)
+            if result:
+                # Refresh the extracted objects
+                self.objects = ACIObjectExtractor.extract_all_objects(self.config)
+            return result
+        except Exception as e:
+            print(f"Error setting child status: {e}")
+            return False
+    
+    def save_config(self, output_path: Optional[str] = None) -> bool:
+        """
+        Save the current configuration to a file
+        
+        Args:
+            output_path: Path to save the configuration (if None, uses original file path)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            save_path = output_path or self.config_file
+            return save_json_config(self.config, save_path)
+        except Exception as e:
+            print(f"Error saving configuration: {e}")
+            return False
+    
     def print_summary(self, list_all: bool = False) -> None:
         """
         Print a summary of the configuration
@@ -111,10 +178,14 @@ class ACIConfigParser:
                         print(f"      Name: {child['attributes']['name']}")
                     if 'attributes' in child and 'descr' in child['attributes']:
                         print(f"      Description: {child['attributes']['descr']}")
+                    if 'attributes' in child and 'status' in child['attributes']:
+                        print(f"      Status: {child['attributes']['status']}")
             # Otherwise show just the first few
             else:
                 for child_idx, child in enumerate(obj['children'][:20]):
                     print(f"    - Child {child_idx+1}: Class {child['class']}")
+                    if 'attributes' in child and 'status' in child['attributes']:
+                        print(f"      Status: {child['attributes']['status']}")
                     if child_idx == 19 and len(obj['children']) > 20:
                         print(f"      ... ({len(obj['children']) - 20} more)")
                         
@@ -152,6 +223,8 @@ def main():
     parser.add_argument('--summary', '-s', action='store_true', help='Show summary only')
     parser.add_argument('--list', '-l', action='store_true', help='List all children')
     parser.add_argument('--class', '-cls', type=str, help='Search for objects of a specific class', default=None)
+    parser.add_argument('--set-status', type=str, help='Set status for a child (requires --child)', default=None)
+    parser.add_argument('--save', action='store_true', help='Save configuration after changes')
     
     args = parser.parse_args()
     
@@ -164,6 +237,27 @@ def main():
     parser = ACIConfigParser(args.file)
     if not parser.load():
         sys.exit(1)
+    
+    # Handle status setting if requested
+    if args.set_status:
+        if args.child is None:
+            print("Error: --set-status requires --child option to specify which child to update")
+            sys.exit(1)
+        
+        print(f"Setting status for child {args.child} to '{args.set_status}'")
+        if parser.set_child_status(args.child, args.set_status):
+            print(f"Status successfully set to '{args.set_status}'")
+            
+            # Save if requested
+            if args.save:
+                save_path = args.output or args.file
+                if parser.save_config(save_path):
+                    print(f"Configuration saved to {save_path}")
+                else:
+                    print("Failed to save configuration")
+        else:
+            print(f"Failed to set status for child {args.child}")
+            sys.exit(1)
     
     # Process based on the arguments
     if args.child is not None:
@@ -183,8 +277,12 @@ def main():
             if 'attributes' in child_config[child_class] and 'descr' in child_config[child_class]['attributes']:
                 print(f"Description: {child_config[child_class]['attributes']['descr']}")
             
+            # Get the status if available
+            if 'attributes' in child_config[child_class] and 'status' in child_config[child_class]['attributes']:
+                print(f"Status: {child_config[child_class]['attributes']['status']}")
+            
             # Output the configuration
-            if args.output:
+            if args.output and not args.save:  # Skip if we've already saved with --save
                 if parser.extract_child_to_file(args.child, args.output):
                     print(f"\nConfiguration saved to {args.output}")
             else:
@@ -210,10 +308,13 @@ def main():
         parser.print_summary(list_all=args.list)
         
         # If no specific action requested, show usage hint
-        if not args.summary and not args.list:
+        if not args.summary and not args.list and args.set_status is None:
             print("\nTo see all objects, use --list or -l flag")
             print("To extract a specific child, use --child <index> or -c <index>")
             print("To search for objects by class, use --class <class_name> or -cls <class_name>")
+            print("To set status for a child, use --child <index> --set-status <status>")
+            print("  Valid status values: 'created', 'modified, created', 'deleted'")
+            print("To save changes, add --save flag")
 
 
 if __name__ == "__main__":

@@ -174,3 +174,93 @@ class ACIObjectExtractor:
             print(f"Error extracting child configuration: {e}")
         
         return None
+
+    @staticmethod
+    def set_object_status(config, status_value, object_path=None):
+        """
+        Set the status attribute for an object or all objects in the configuration
+        
+        Args:
+            config: The ACI configuration object (can be full config or a specific object)
+            status_value: Status value to set (e.g. "created", "modified, created", "deleted")
+            object_path: Path to specific object to update (if None, updates root object)
+            
+        Returns:
+            The modified configuration with status attributes added/updated
+        """
+        if not config:
+            return config
+            
+        # Handle different config structures
+        if isinstance(config, dict):
+            # If it's a single-class ACI object format (e.g., {"fvAp": {...}})
+            if len(config) == 1 and isinstance(list(config.values())[0], dict):
+                class_name = list(config.keys())[0]
+                class_data = config[class_name]
+                
+                # Initialize attributes dict if it doesn't exist
+                if "attributes" not in class_data:
+                    class_data["attributes"] = {}
+                    
+                # Set the status attribute
+                class_data["attributes"]["status"] = status_value
+                
+                # If this is the target object, we're done
+                # Otherwise, recursively process all children too
+                if object_path and len(object_path) > 1:
+                    # Remove the first path component and continue with children
+                    next_path = object_path[1:]
+                    if "children" in class_data and isinstance(class_data["children"], list):
+                        for child in class_data["children"]:
+                            ACIObjectExtractor.set_object_status(child, status_value, next_path)
+            
+            # Handle "imdata" format of configurations
+            elif "imdata" in config and isinstance(config["imdata"], list):
+                for item in config["imdata"]:
+                    ACIObjectExtractor.set_object_status(item, status_value, 
+                                                      object_path[0] if object_path else None)
+        
+        # Handle list format (like children arrays)
+        elif isinstance(config, list):
+            # If object_path is provided, find the specific object to update
+            if object_path:
+                target_class = object_path[0]
+                for item in config:
+                    if isinstance(item, dict) and len(item) == 1:
+                        class_name = list(item.keys())[0]
+                        if class_name == target_class:
+                            # Found target, update it
+                            next_path = object_path[1:] if len(object_path) > 1 else None
+                            ACIObjectExtractor.set_object_status(item, status_value, next_path)
+            else:
+                # No path provided, update all items in list
+                for item in config:
+                    ACIObjectExtractor.set_object_status(item, status_value, None)
+                    
+        return config
+        
+    @staticmethod
+    def set_status_for_child(config, child_index, status_value):
+        """
+        Set the status for a specific child by index
+        
+        Args:
+            config: The loaded ACI configuration
+            child_index: Index of the child to update (0-based)
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get the child configuration
+            child = ACIObjectExtractor.get_child_original_config(config, 0, child_index)
+            if not child:
+                return False
+                
+            # Set the status
+            ACIObjectExtractor.set_object_status(child, status_value)
+            return True
+        except Exception as e:
+            print(f"Error setting status for child: {e}")
+            return False
