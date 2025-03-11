@@ -60,6 +60,69 @@ class ACIConfigParser:
             self.config, parent_index, child_index
         )
     
+    def get_multiple_children_config(self, child_indices: List[int], parent_index: int = 0) -> Dict[str, Any]:
+        """
+        Get multiple children's configurations and combine them into a single structure
+        
+        Args:
+            child_indices: List of child indices to extract (0-based)
+            parent_index: Index of the parent object (default: 0)
+            
+        Returns:
+            Dictionary containing the combined configuration with multiple children
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        # Extract the root structure to replicate
+        root_structure = None
+        if 'imdata' in self.config and isinstance(self.config['imdata'], list) and len(self.config['imdata']) > parent_index:
+            parent_obj = self.config['imdata'][parent_index]
+            if parent_obj:
+                parent_class = list(parent_obj.keys())[0]
+                # Create a copy of the parent structure without its children
+                root_structure = {
+                    "totalCount": self.config.get("totalCount", "1"),
+                    "imdata": [
+                        {
+                            parent_class: {
+                                "attributes": parent_obj[parent_class].get("attributes", {}),
+                                "children": []
+                            }
+                        }
+                    ]
+                }
+                
+        if not root_structure:
+            # Create a default structure if original couldn't be extracted
+            root_structure = {
+                "totalCount": "1",
+                "imdata": [
+                    {
+                        "fvTenant": {  # Default class, may need to be adjusted
+                            "attributes": {},
+                            "children": []
+                        }
+                    }
+                ]
+            }
+            
+        # Get each requested child and add it to the root structure
+        children_list = []
+        for idx in child_indices:
+            child_config = self.get_child_config(parent_index, idx)
+            if child_config:
+                children_list.append(child_config)
+            else:
+                print(f"Warning: Child with index {idx} not found")
+        
+        # Add all found children to the root structure
+        if children_list:
+            parent_class = list(root_structure["imdata"][0].keys())[0]
+            root_structure["imdata"][0][parent_class]["children"] = children_list
+            
+        return root_structure
+    
     def get_objects_by_class(self, class_name: str) -> List[Dict[str, Any]]:
         """
         Find all objects of a specific class
@@ -121,6 +184,37 @@ class ACIConfigParser:
         except Exception as e:
             print(f"Error setting child status: {e}")
             return False
+    
+    def set_multiple_children_status(self, child_indices: List[int], status_value: str) -> bool:
+        """
+        Set the status for multiple children by indices
+        
+        Args:
+            child_indices: List of child indices to update (0-based)
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        success = True
+        for idx in child_indices:
+            try:
+                result = ACIObjectExtractor.set_status_for_child(self.config, idx, status_value)
+                if not result:
+                    print(f"Failed to set status for child {idx}")
+                    success = False
+            except Exception as e:
+                print(f"Error setting status for child {idx}: {e}")
+                success = False
+                
+        # Refresh the extracted objects if any updates were successful
+        if success:
+            self.objects = ACIObjectExtractor.extract_all_objects(self.config)
+            
+        return success
     
     def save_config(self, output_path: Optional[str] = None) -> bool:
         """
@@ -210,6 +304,28 @@ class ACIConfigParser:
         except Exception as e:
             print(f"Error extracting child configuration: {e}")
             return False
+            
+    def extract_multiple_children_to_file(self, child_indices: List[int], output_path: str) -> bool:
+        """
+        Extract multiple child configurations and save them as a combined file
+        
+        Args:
+            child_indices: List of child indices to extract (0-based)
+            output_path: Path where to save the extracted configuration
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            combined_config = self.get_multiple_children_config(child_indices)
+            if not combined_config or not combined_config.get('imdata', []):
+                print("No valid children found to extract")
+                return False
+                
+            return save_json_config(combined_config, output_path)
+        except Exception as e:
+            print(f"Error extracting multiple child configurations: {e}")
+            return False
 
 
 def main():
@@ -219,11 +335,12 @@ def main():
     parser.add_argument('--file', '-f', type=str, help='Path to the configuration file', 
                        default=r"C:\Users\dsu979\OneDrive - dynexo GmbH\Desktop\APIC\APIC_Parser\tn-Datacenter1.json")
     parser.add_argument('--child', '-c', type=int, help='Index of child to extract (0-based)', default=None)
+    parser.add_argument('--children', '-m', type=str, help='Comma-separated list of child indices to extract (e.g., "1,3,5")', default=None)
     parser.add_argument('--output', '-o', type=str, help='Output file path (optional)', default=None)
     parser.add_argument('--summary', '-s', action='store_true', help='Show summary only')
     parser.add_argument('--list', '-l', action='store_true', help='List all children')
     parser.add_argument('--class', '-cls', type=str, help='Search for objects of a specific class', default=None)
-    parser.add_argument('--set-status', type=str, help='Set status for a child (requires --child)', default=None)
+    parser.add_argument('--set-status', type=str, help='Set status for selected children', default=None)
     parser.add_argument('--save', action='store_true', help='Save configuration after changes')
     
     args = parser.parse_args()
@@ -238,36 +355,60 @@ def main():
     if not parser.load():
         sys.exit(1)
     
+    # Parse multiple children indices if provided
+    child_indices = []
+    if args.children:
+        try:
+            child_indices = [int(idx.strip()) for idx in args.children.split(',')]
+            print(f"Processing multiple children: {child_indices}")
+        except ValueError:
+            print(f"Error: Invalid format for --children parameter. Use comma-separated integers, e.g., '1,3,5'")
+            sys.exit(1)
+    
     # Handle status setting if requested
     if args.set_status:
-        if args.child is None:
-            print("Error: --set-status requires --child option to specify which child to update")
-            sys.exit(1)
-        
-        print(f"Setting status for child {args.child} to '{args.set_status}'")
-        if parser.set_child_status(args.child, args.set_status):
-            print(f"Status successfully set to '{args.set_status}'")
-            
-            # Save if requested
-            if args.save:
-                save_path = args.output or args.file
-                if parser.save_config(save_path):
-                    print(f"Configuration saved to {save_path}")
-                else:
-                    print("Failed to save configuration")
+        # Determine whether to update a single child or multiple children
+        if args.child is not None:
+            print(f"Setting status for child {args.child} to '{args.set_status}'")
+            if parser.set_child_status(args.child, args.set_status):
+                print(f"Status successfully set to '{args.set_status}'")
+                # Save if requested
+                if args.save:
+                    save_path = args.output or args.file
+                    if parser.save_config(save_path):
+                        print(f"Configuration saved to {save_path}")
+                    else:
+                        print("Failed to save configuration")
+            else:
+                print(f"Failed to set status for child {args.child}")
+                sys.exit(1)
+        elif child_indices:
+            print(f"Setting status for children {child_indices} to '{args.set_status}'")
+            if parser.set_multiple_children_status(child_indices, args.set_status):
+                print(f"Status successfully set to '{args.set_status}' for all specified children")
+                # Save if requested
+                if args.save:
+                    save_path = args.output or args.file
+                    if parser.save_config(save_path):
+                        print(f"Configuration saved to {save_path}")
+                    else:
+                        print("Failed to save configuration")
+            else:
+                print(f"Failed to set status for some or all children")
+                sys.exit(1)
         else:
-            print(f"Failed to set status for child {args.child}")
+            print("Error: --set-status requires either --child or --children option to specify which children to update")
             sys.exit(1)
     
     # Process based on the arguments
     if args.child is not None:
-        print(f"\n--- Getting Child {args.child+1}'s original configuration ---")
+        print(f"\n--- Getting Child {args.child}'s original configuration ---")
         child_config = parser.get_child_config(child_index=args.child)
         
         if child_config:
             # Get the class name
             child_class = list(child_config.keys())[0]
-            print(f"Child {args.child+1} class: {child_class}")
+            print(f"Child {args.child} class: {child_class}")
             
             # Get the name if available
             if 'attributes' in child_config[child_class] and 'name' in child_config[child_class]['attributes']:
@@ -290,6 +431,28 @@ def main():
                 print("\nOriginal configuration:")
                 print(json.dumps(child_config, indent=2))
     
+    elif child_indices:
+        print(f"\n--- Getting configuration for children {child_indices} ---")
+        # Extract and save multiple children to file if output path is specified
+        if args.output and not args.save:  # Skip if we've already saved with --save
+            if parser.extract_multiple_children_to_file(child_indices, args.output):
+                print(f"\nCombined configuration saved to {args.output}")
+            else:
+                print(f"Failed to save combined configuration")
+        else:
+            # Just show summary information about the selected children
+            for idx in child_indices:
+                child_config = parser.get_child_config(child_index=idx)
+                if child_config:
+                    child_class = list(child_config.keys())[0]
+                    print(f"\nChild {idx} class: {child_class}")
+                    if 'attributes' in child_config[child_class] and 'name' in child_config[child_class]['attributes']:
+                        print(f"Name: {child_config[child_class]['attributes']['name']}")
+                    if 'attributes' in child_config[child_class] and 'descr' in child_config[child_class]['attributes']:
+                        print(f"Description: {child_config[child_class]['attributes']['descr']}")
+                else:
+                    print(f"\nChild {idx} not found")
+    
     elif getattr(args, 'class'):
         class_name = getattr(args, 'class')
         print(f"Searching for objects of class {class_name}...")
@@ -311,8 +474,10 @@ def main():
         if not args.summary and not args.list and args.set_status is None:
             print("\nTo see all objects, use --list or -l flag")
             print("To extract a specific child, use --child <index> or -c <index>")
+            print("To extract multiple children, use --children '1,3,5' or -m '1,3,5'")
             print("To search for objects by class, use --class <class_name> or -cls <class_name>")
             print("To set status for a child, use --child <index> --set-status <status>")
+            print("To set status for multiple children, use --children '1,3,5' --set-status <status>")
             print("  Valid status values: 'created', 'modified, created', 'deleted'")
             print("To save changes, add --save flag")
 

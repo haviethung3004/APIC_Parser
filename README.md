@@ -8,6 +8,7 @@ APIC Parser is designed to help network administrators and automation engineers 
 
 - Parse and analyze ACI configuration files
 - Extract specific child objects by index
+- Extract multiple child objects simultaneously
 - Search for objects by class name
 - Generate summaries of configuration hierarchies
 - Export configurations to separate files
@@ -50,11 +51,12 @@ This will start a local web server and open the APIC Parser web interface in you
 |--------|-------|-------------|
 | `--file FILE` | `-f FILE` | Path to the configuration file |
 | `--child INDEX` | `-c INDEX` | Index of child to extract (0-based) |
+| `--children LIST` | `-m LIST` | Comma-separated list of child indices to extract (e.g., "1,3,5") |
 | `--output FILE` | `-o FILE` | Output file path for extracted configuration |
 | `--summary` | `-s` | Show summary only |
 | `--list` | `-l` | List all children |
 | `--class CLASS` | `-cls CLASS` | Search for objects of a specific class |
-| `--set-status STATUS` | | Set status for a child (requires --child) |
+| `--set-status STATUS` | | Set status for selected children |
 | `--save` | | Save configuration after changes |
 | `--help` | `-h` | Show help message |
 
@@ -78,34 +80,52 @@ python apic_parser.py -f your_config.json --list
 python apic_parser.py -f your_config.json -c 9
 ```
 
-4. Save a child object to a separate file:
+4. Extract multiple child objects:
+
+```bash
+python apic_parser.py -f your_config.json -m "9,12,15"
+```
+
+5. Save a child object to a separate file:
 
 ```bash
 python apic_parser.py -f your_config.json -c 9 -o child9.json
 ```
 
-5. Search for objects of a specific class:
+6. Save multiple child objects to a single file:
+
+```bash
+python apic_parser.py -f your_config.json -m "9,12,15" -o multi_children.json
+```
+
+7. Search for objects of a specific class:
 
 ```bash
 python apic_parser.py -f your_config.json --class fvBD
 ```
 
-6. Set status attribute for a child object:
+8. Set status attribute for a child object:
 
 ```bash
 python apic_parser.py -f your_config.json -c 3 --set-status "created" --save
 ```
 
-7. Mark a child object as deleted:
+9. Set status attribute for multiple child objects:
+
+```bash
+python apic_parser.py -f your_config.json -m "3,5,7" --set-status "created" --save
+```
+
+10. Mark a child object as deleted:
 
 ```bash
 python apic_parser.py -f your_config.json -c 5 --set-status "deleted" --save
 ```
 
-8. Mark a child object as modified:
+11. Mark multiple child objects as modified:
 
 ```bash
-python apic_parser.py -f your_config.json -c 2 --set-status "modified, created" --save
+python apic_parser.py -f your_config.json -m "2,4,6" --set-status "modified, created" --save
 ```
 
 ## Web Interface Features
@@ -119,6 +139,20 @@ The Streamlit-based web interface provides a user-friendly way to interact with 
 - **Extract Child**: Extract and download specific child objects
 - **Class Search**: Search for objects by class name
 - **Status Management**: Set status attributes for objects easily and save changes
+
+## Multiple Object Selection Feature
+
+The multiple object selection feature allows you to work with several objects simultaneously:
+
+- Extract multiple objects from a configuration into a single combined JSON file
+- Set the same status for multiple objects at once (created, modified, deleted)
+- Maintain the hierarchical structure of the original configuration
+- Preserve the parent object's attributes while including only the selected child objects
+
+This feature is especially useful when you need to:
+- Generate configuration snippets with related objects
+- Apply the same status to groups of related objects
+- Create template configurations with specific object combinations
 
 ## Status Attribute Feature
 
