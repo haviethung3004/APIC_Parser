@@ -176,6 +176,196 @@ class ACIObjectExtractor:
         return None
 
     @staticmethod
+    def get_nested_child_by_path(config, path):
+        """
+        Get a nested child object by path.
+        Path format: [parent_index, child_index, grandchild_index, ...] 
+        For example: [0, 5, 2] would get the 3rd child (index 2) of the 6th child (index 5) of the 1st parent (index 0)
+        
+        Args:
+            config: The loaded JSON configuration
+            path: List of indices to follow to reach the target object
+            
+        Returns:
+            The nested child object configuration as a dictionary, or None if not found
+        """
+        if not path:
+            return None
+            
+        try:
+            current = config
+            
+            # Navigate to the main tenant object (typically first object in imdata)
+            if 'imdata' in current and isinstance(current['imdata'], list):
+                # First index is for the parent (usually tenant)
+                parent_index = path[0]
+                if parent_index >= len(current['imdata']):
+                    print(f"Parent index {parent_index} out of range")
+                    return None
+                    
+                parent_obj = current['imdata'][parent_index]
+                
+                # Get the first key in the parent object (typically 'fvTenant')
+                if not parent_obj:
+                    return None
+                    
+                parent_class = list(parent_obj.keys())[0]
+                current = parent_obj[parent_class]
+                
+                # Continue navigating through the path
+                for i, index in enumerate(path[1:], 1):
+                    if 'children' not in current or not isinstance(current['children'], list):
+                        print(f"No children found at path level {i}")
+                        return None
+                        
+                    if index >= len(current['children']):
+                        print(f"Index {index} at path level {i} out of range")
+                        return None
+                        
+                    # Move to the next level
+                    child_obj = current['children'][index]
+                    
+                    # For the last index in the path, return the full child object
+                    if i == len(path) - 1:
+                        return child_obj
+                        
+                    # Otherwise, dive deeper
+                    child_class = list(child_obj.keys())[0]
+                    current = child_obj[child_class]
+            
+            # If we got here without returning, something went wrong
+            return None
+                
+        except Exception as e:
+            print(f"Error extracting nested child configuration: {e}")
+            return None
+    
+    @staticmethod
+    def set_status_for_nested_child(config, path, status_value):
+        """
+        Set the status attribute for a nested child object by path
+        
+        Args:
+            config: The loaded JSON configuration
+            path: List of indices to follow to reach the target object
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted", None)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get the nested child
+            nested_child = ACIObjectExtractor.get_nested_child_by_path(config, path)
+            if not nested_child:
+                return False
+                
+            # Set the status
+            if status_value is None:
+                # Remove status if None is provided
+                child_class = list(nested_child.keys())[0]
+                if 'attributes' in nested_child[child_class] and 'status' in nested_child[child_class]['attributes']:
+                    del nested_child[child_class]['attributes']['status']
+            else:
+                # Set the status
+                ACIObjectExtractor.set_object_status(nested_child, status_value)
+                
+            return True
+        except Exception as e:
+            print(f"Error setting status for nested child: {e}")
+            return False
+    
+    @staticmethod
+    def get_object_hierarchy(config, max_depth=None):
+        """
+        Generate a hierarchical representation of objects with their paths for easy navigation
+        
+        Args:
+            config: The loaded JSON configuration
+            max_depth: Maximum depth to traverse (default: None = unlimited)
+            
+        Returns:
+            List of hierarchical objects with their indices and paths
+        """
+        result = []
+        
+        try:
+            # Check if we have imdata
+            if 'imdata' not in config or not isinstance(config['imdata'], list):
+                return result
+                
+            # Process each top-level object (usually just one tenant)
+            for parent_index, parent_item in enumerate(config['imdata']):
+                for parent_class, parent_data in parent_item.items():
+                    parent_name = parent_data.get('attributes', {}).get('name', f'Object {parent_class}')
+                    parent_entry = {
+                        'index': parent_index,
+                        'path': [parent_index],
+                        'class': parent_class,
+                        'name': parent_name,
+                        'children': []
+                    }
+                    
+                    # Process children
+                    if 'children' in parent_data and isinstance(parent_data['children'], list):
+                        ACIObjectExtractor._process_children_hierarchy(
+                            parent_data['children'], 
+                            parent_entry['children'],
+                            parent_entry['path'],
+                            1,  # Current depth
+                            max_depth
+                        )
+                    
+                    result.append(parent_entry)
+        except Exception as e:
+            print(f"Error generating object hierarchy: {e}")
+            
+        return result
+    
+    @staticmethod
+    def _process_children_hierarchy(children, result, parent_path, current_depth, max_depth):
+        """
+        Helper method to recursively process children for the hierarchy
+        
+        Args:
+            children: List of child objects
+            result: List to store results
+            parent_path: Path indices of parent
+            current_depth: Current depth in hierarchy
+            max_depth: Maximum depth to traverse
+        """
+        if max_depth is not None and current_depth > max_depth:
+            return
+            
+        for child_index, child_item in enumerate(children):
+            for child_class, child_data in child_item.items():
+                child_name = child_data.get('attributes', {}).get('name', f'{child_class} {child_index}')
+                child_status = child_data.get('attributes', {}).get('status', 'None')
+                
+                # Create path by appending current index to parent path
+                current_path = parent_path + [child_index]
+                
+                child_entry = {
+                    'index': child_index,
+                    'path': current_path,
+                    'class': child_class,
+                    'name': child_name,
+                    'status': child_status,
+                    'children': []
+                }
+                
+                # Process nested children
+                if 'children' in child_data and isinstance(child_data['children'], list):
+                    ACIObjectExtractor._process_children_hierarchy(
+                        child_data['children'],
+                        child_entry['children'],
+                        current_path,
+                        current_depth + 1,
+                        max_depth
+                    )
+                
+                result.append(child_entry)
+
+    @staticmethod
     def set_object_status(config, status_value, object_path=None):
         """
         Set the status attribute for an object or all objects in the configuration

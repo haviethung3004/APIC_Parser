@@ -99,6 +99,51 @@ def save_and_download_config(parser, output_filename):
         st.error(f"Error saving configuration: {str(e)}")
         return False
 
+def render_nested_object_tree(hierarchy, selected_paths):
+    """Render a nested object tree with checkboxes for selection"""
+    if not hierarchy:
+        return []
+
+    for i, item in enumerate(hierarchy):
+        parent_id = f"batch_root_{i}"
+        parent_path = item['path']
+        parent_text = f"{item['class']} - {item['name']}"
+        parent_selected = parent_path in selected_paths
+        
+        if st.checkbox(parent_text, value=parent_selected, key=parent_id):
+            if parent_path not in selected_paths:
+                selected_paths.append(parent_path)
+        elif parent_path in selected_paths:
+            selected_paths.remove(parent_path)
+            
+        # Process children with indentation
+        if item['children']:
+            render_children_tree(item['children'], selected_paths, 1)
+
+    return selected_paths
+
+def render_children_tree(children, selected_paths, level=1):
+    """Helper function to render children in the tree view"""
+    for i, child in enumerate(children):
+        child_id = f"batch_child_{level}_{i}_{child['path']}"
+        child_path = child['path']
+        status_info = f" | Status: {child['status']}" if child.get('status', 'None') != 'None' else ""
+        # Use spacing for indentation instead of nested columns
+        indent = "&nbsp;" * (level * 4)
+        child_text = f"{child['class']} - {child['name']}{status_info}"
+        st.markdown(f"{indent}", unsafe_allow_html=True)
+        child_selected = child_path in selected_paths
+        
+        if st.checkbox(child_text, value=child_selected, key=child_id):
+            if child_path not in selected_paths:
+                selected_paths.append(child_path)
+        elif child_path in selected_paths:
+            selected_paths.remove(child_path)
+            
+        # Recursively process grandchildren if any
+        if child.get('children'):
+            render_children_tree(child['children'], selected_paths, level + 1)
+
 # Sidebar for file selection and general options
 st.sidebar.title("APIC Parser")
 st.sidebar.image("https://www.cisco.com/c/dam/assets/swa/img/anchor-images/cloud-networking-aci-anchor.jpg", width=100)
@@ -117,6 +162,10 @@ if "parser" not in st.session_state:
     st.session_state.parser = None
     st.session_state.config_file = None
     st.session_state.filename = None
+
+# Initialize selected paths session state
+if "selected_paths" not in st.session_state:
+    st.session_state.selected_paths = []
 
 # Handle file upload
 if uploaded_file is not None:
@@ -144,7 +193,7 @@ elif sample_file != "None":
 if st.session_state.parser:
     nav_option = st.sidebar.radio(
         "Navigate:",
-        ["Summary", "Child Objects", "Extract & Modify", "Class Search"]
+        ["Summary", "Child Objects", "Nested Objects", "Extract & Modify", "Class Search"]
     )
 else:
     st.title("APIC Parser")
@@ -203,6 +252,7 @@ elif nav_option == "Child Objects":
     parser = st.session_state.parser
     
     if parser.objects and parser.objects[0]['children']:
+
         children = parser.objects[0]['children']
         
         # Create a dataframe for the table view
@@ -256,7 +306,7 @@ elif nav_option == "Child Objects":
         if selected_index is not None:
             child = children[selected_index]
             st.subheader(f"Object Details: {child['attributes'].get('name', f'Object {selected_index}')}")
-            
+
             # Show attributes
             st.write("#### Attributes")
             st.dataframe(format_attributes_table(child['attributes']), use_container_width=True)
@@ -274,6 +324,173 @@ elif nav_option == "Child Objects":
                 st.json(child)
     else:
         st.warning("No child objects found in the configuration.")
+
+elif nav_option == "Nested Objects":
+    st.title(f"Nested Objects: {st.session_state.filename}")
+    
+    parser = st.session_state.parser
+    
+    # Get the full object hierarchy
+    hierarchy = parser.get_object_hierarchy()
+    
+    if hierarchy:
+        st.write("### Object Hierarchy")
+        st.write("Navigate through the nested object structure. Click on any object to view its details.")
+        
+        # Left column for tree view, right for details
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.write("#### Object Tree")
+            # Use session state to maintain selection state between renders
+            selected_object_path = None
+            
+            # Create a simple tree representation without nested columns
+            for i, root_obj in enumerate(hierarchy):
+                root_expanded = st.checkbox(f"{root_obj['class']} - {root_obj['name']}", key=f"tree_root_{i}")
+                
+                if root_expanded:
+                    # Display children with indentation
+                    def render_tree(children, level=1, parent_path=None):
+                        for j, child in enumerate(children):
+                            child_path = child['path']
+                            status_badge = ""
+                            if child.get('status', 'None') not in ('None', 'N/A'):
+                                status = child['status']
+                                color = "red" if status == "deleted" else "green" if status == "created" else "orange"
+                                status_badge = f" <span style='color:{color}'>[{status}]</span>"
+                            
+                            # Use HTML spacing for indentation instead of nested columns
+                            indent = "&nbsp;" * (level * 4)
+                            st.markdown(f"{indent}", unsafe_allow_html=True)
+                                
+                            child_key = f"tree_node_{level}_{j}_{child_path}"
+                            child_selected = st.button(
+                                f"• {child['class']} - {child['name']}{status_badge}", 
+                                key=child_key,
+                                help=f"Path: {child_path}"
+                            )
+                            
+                            if child_selected:
+                                selected_object_path = child_path
+                                st.session_state.selected_obj_path = child_path
+                                
+                            # Recursively render any children
+                            if child.get('children'):
+                                render_tree(child['children'], level + 1, child_path)
+                    
+                    # Render children starting with level 1
+                    render_tree(root_obj['children'])
+        
+        # Right column for object details
+        with col2:
+            st.write("#### Object Details")
+            
+            # Check if an object is selected from the tree
+            selected_path = st.session_state.get('selected_obj_path', None)
+            if selected_path:
+                # Get the object configuration
+                obj_config = parser.get_nested_child_config(selected_path)
+                
+                if obj_config:
+                    # Extract class name and attributes
+                    obj_class = list(obj_config.keys())[0]
+                    obj_data = obj_config[obj_class]
+                    attributes = obj_data.get('attributes', {})
+                    
+                    # Display object information
+                    st.subheader(f"{obj_class}")
+                    if 'name' in attributes:
+                        st.write(f"**Name:** {attributes['name']}")
+                    
+                    # Status information
+                    current_status = attributes.get('status', 'None')
+                    status_color = "red" if current_status == "deleted" else "green" if current_status == "created" else "orange" if "modified" in str(current_status) else "gray"
+                    st.write(f"**Current Status:** <span style='color:{status_color};font-weight:bold'>{current_status}</span>", unsafe_allow_html=True)
+                    
+                    # Status modification options
+                    st.write("### Modify Status")
+                    new_status = st.selectbox(
+                        "Set new status:",
+                        options=["No change", "created", "modified, created", "deleted", "None (remove status)"],
+                        key=f"status_{selected_path}"
+                    )
+                    
+                    if st.button("Apply Status Change"):
+                        if new_status != "No change":
+                            status_value = None if new_status == "None (remove status)" else new_status
+                            if parser.set_nested_child_status(selected_path, status_value):
+                                st.success(f"Status updated to: {status_value or 'None'}")
+                                # Refresh hierarchy
+                                hierarchy = parser.get_object_hierarchy()
+                            else:
+                                st.error("Failed to update status")
+                        else:
+                            st.info("No status change requested")
+                    
+                    # Attributes table
+                    st.write("### Attributes")
+                    st.dataframe(format_attributes_table(attributes), use_container_width=True)
+                    
+                    # Children summary
+                    if 'children' in obj_data and obj_data['children']:
+                        children = obj_data['children']
+                        st.write(f"### Children ({len(children)})")
+                        for i, child in enumerate(children):
+                            child_class = list(child.keys())[0]
+                            child_attrs = child[child_class].get('attributes', {})
+                            child_name = child_attrs.get('name', f"Child {i}")
+                            child_status = child_attrs.get('status', 'None')
+                            st.write(f"- {child_name} ({child_class}) | Status: {child_status}")
+                    
+                    # Show JSON option
+                    if st.checkbox("Show Raw JSON"):
+                        st.json(obj_config)
+                else:
+                    st.warning(f"Could not retrieve configuration for object at path {selected_path}")
+            else:
+                st.info("Select an object from the tree to view details")
+
+        # Batch operations section
+        st.write("### Batch Operations")
+        st.write("Select multiple objects from the hierarchy and perform operations.")
+        
+        # Create the selection tree
+        selected_paths = render_nested_object_tree(hierarchy, st.session_state.selected_paths)
+        st.session_state.selected_paths = selected_paths
+        
+        if selected_paths:
+            st.write(f"Selected {len(selected_paths)} objects")
+            
+            # Batch status update
+            status_options = ["created", "modified, created", "deleted", "None (remove status)"]
+            batch_status = st.selectbox("Set status for all selected objects:", options=status_options)
+            
+            if st.button("Apply Batch Status Change"):
+                status_value = None if batch_status == "None (remove status)" else batch_status
+                if parser.set_multiple_nested_children_status(selected_paths, status_value):
+                    st.success(f"Status updated to '{status_value or 'None'}' for all selected objects")
+                    # Refresh hierarchy and clear selections
+                    hierarchy = parser.get_object_hierarchy()
+                    st.session_state.selected_paths = []
+                else:
+                    st.error("Failed to update status for some or all objects")
+            
+            # Extract selected objects
+            if st.button("Extract Selected Objects"):
+                output_filename = f"selected_objects_{len(selected_paths)}.json"
+                if parser.extract_multiple_nested_children_to_file(selected_paths, os.path.join(tempfile.gettempdir(), output_filename)):
+                    with open(os.path.join(tempfile.gettempdir(), output_filename), 'r') as f:
+                        extracted_data = json.load(f)
+                    st.success(f"{len(selected_paths)} objects extracted successfully!")
+                    st.markdown(
+                        create_download_link(extracted_data, output_filename, "Download JSON file"),
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.error("Failed to extract objects")
+    else:
+        st.warning("No object hierarchy found in the configuration.")
 
 elif nav_option == "Extract & Modify":
     st.title(f"Extract & Modify: {st.session_state.filename}")
