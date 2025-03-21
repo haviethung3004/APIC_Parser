@@ -255,10 +255,10 @@ elif st.session_state.view_mode == "Object Explorer":
             )
         
         with col2:
-            status_filter = st.multiselect(
-                "Filter by Status:",
-                options=sorted(df['Status'].unique()),
-                default=[]
+            # Changed from status_filter to name_filter
+            name_filter = st.text_input(
+                "Filter by Name:",
+                key="name_filter_input"
             )
             
         with col3:
@@ -272,8 +272,9 @@ elif st.session_state.view_mode == "Object Explorer":
         filtered_df = df
         if class_filter:
             filtered_df = filtered_df[filtered_df['Class'].isin(class_filter)]
-        if status_filter:
-            filtered_df = filtered_df[filtered_df['Status'].isin(status_filter)]
+        if name_filter:
+            # Filter by name using case-insensitive contains
+            filtered_df = filtered_df[filtered_df['Name'].str.contains(name_filter, case=False, na=False)]
             
         # Apply sorting
         if sort_by == "Children (desc)":
@@ -556,10 +557,10 @@ elif st.session_state.view_mode == "Object Explorer":
                                 )
                             
                             with col2:
-                                child_status_filter = st.multiselect(
-                                    "Filter children by status:",
-                                    options=sorted(child_df['Status'].unique()) if not child_df.empty else [],
-                                    key="child_status_filter"
+                                # Changed from child_status_filter to child_name_filter
+                                child_name_filter = st.text_input(
+                                    "Filter children by name:",
+                                    key="child_name_filter_input"
                                 )
                                 
                             with col3:
@@ -574,8 +575,9 @@ elif st.session_state.view_mode == "Object Explorer":
                             filtered_child_df = child_df
                             if child_class_filter:
                                 filtered_child_df = filtered_child_df[filtered_child_df['Class'].isin(child_class_filter)]
-                            if child_status_filter:
-                                filtered_child_df = filtered_child_df[filtered_child_df['Status'].isin(child_status_filter)]
+                            if child_name_filter:
+                                # Filter by name using case-insensitive contains
+                                filtered_child_df = filtered_child_df[filtered_child_df['Name'].str.contains(child_name_filter, case=False, na=False)]
                                 
                             # Apply sorting to children
                             if child_sort_by == "Index":
