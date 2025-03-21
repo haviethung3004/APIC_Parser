@@ -131,41 +131,41 @@ python apic_parser.py -f your_config.json -m "2,4,6" --set-status "modified, cre
 
 ## Web Interface Features
 
-The Streamlit-based web interface provides a user-friendly way to interact with ACI configuration files through several tabs:
+The Streamlit-based web interface provides a user-friendly way to interact with ACI configuration files through an optimized interface with two main view modes:
 
-### Summary Tab
+### Summary View
 - Visual summaries of your configuration with charts
 - Object class distribution overview
 - Root object details with expandable sections
+- Quick access to configuration statistics
 
-### Objects & Extraction Tab
-- Filter objects by class and status
-- View details of any selected object
-- Extract individual or multiple objects with a single click
+### Object Explorer View
+The Object Explorer view provides an integrated experience with the following features:
 
-#### Object Details Subtab
+#### 1. Quick Filters and Navigation
+- Filter objects by class and status in the sidebar
+- Sort objects by various attributes 
+- Visual table view of all objects matching your filters
+- Clear selection interface for working with objects
+
+#### 2. Object Details
 - View detailed information about selected objects 
 - Inspect attributes and children of objects
 - View raw JSON configuration
 
-#### Extract & Modify Subtab
+#### 3. Modify & Extract
 - Single object or multi-object selection modes
 - Preview configurations before extraction
-- Set status attributes (create, modify, delete)
+- Set status attributes (created, modified, deleted)
 - Export configurations to downloadable JSON files
 - Save changes back to the original configuration
+- Class-based selection for working with groups of similar objects
 
-#### Class Operations Subtab
-- Filter and work with objects of a specific class
-- Perform bulk operations on objects of the same class
-- Set status attributes for multiple objects simultaneously
-
-#### Children Manager Subtab
-- Manage nested children of parent objects (like fvAP objects)
+#### 4. Children Manager
+- Manage nested children of parent objects
 - View the hierarchical structure of complex objects
-- Sort parent objects by number of children
-- Select and modify individual or multiple nested children
-- Extract nested children with updated status values
+- Filter and select children by class and status
+- Extract and modify individual or multiple nested children
 - Apply status changes to multiple nested children at once
 
 ## Object Selection Features
