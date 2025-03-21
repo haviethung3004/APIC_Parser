@@ -123,33 +123,12 @@ st.sidebar.title("APIC Parser")
 # File upload
 uploaded_file = st.sidebar.file_uploader("Upload ACI JSON Configuration", type=["json"])
 
-# Sample files option
-sample_file = st.sidebar.selectbox(
-    "Or select a sample file:",
-    ["None", "tn-Datacenter1.json"]
-)
-
 # Handle file upload
 if uploaded_file is not None:
     if load_file_from_upload(uploaded_file):
         st.sidebar.success(f"Loaded: {uploaded_file.name}")
     else:
         st.sidebar.error("Failed to load configuration file.")
-
-# Handle sample file selection
-elif sample_file != "None":
-    sample_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), sample_file)
-    if os.path.exists(sample_path):
-        parser = ACIConfigParser(sample_path)
-        if parser.load():
-            st.session_state.parser = parser
-            st.session_state.config_file = sample_path
-            st.session_state.filename = sample_file
-            st.sidebar.success(f"Loaded: {sample_file}")
-        else:
-            st.sidebar.error("Failed to load sample file.")
-    else:
-        st.sidebar.error(f"Sample file not found: {sample_path}")
 
 # Navigation menu in sidebar
 if st.session_state.parser:
@@ -189,7 +168,7 @@ else:
     # Welcome screen when no file is loaded
     st.title("APIC Parser")
     st.write("### Welcome to the APIC Parser Web Interface")
-    st.write("Please upload a JSON configuration file or select a sample file from the sidebar to begin.")
+    st.write("Please upload a JSON configuration file to begin.")
     st.session_state.view_mode = None
 
 # Main content area
@@ -566,8 +545,8 @@ elif st.session_state.view_mode == "Object Explorer":
                             # Create dataframe and apply filtering for children
                             child_df = pd.DataFrame(child_records)
                             
-                            # Filter options for children
-                            col1, col2 = st.columns(2)
+                            # Filter and sort options for children
+                            col1, col2, col3 = st.columns(3)
                             
                             with col1:
                                 child_class_filter = st.multiselect(
@@ -582,6 +561,14 @@ elif st.session_state.view_mode == "Object Explorer":
                                     options=sorted(child_df['Status'].unique()) if not child_df.empty else [],
                                     key="child_status_filter"
                                 )
+                                
+                            with col3:
+                                child_sort_by = st.selectbox(
+                                    "Sort children by:",
+                                    options=["Index", "Class", "Name", "Status", "Children (desc)"],
+                                    index=0,
+                                    key="child_sort_by"
+                                )
                             
                             # Apply filters to child dataframe
                             filtered_child_df = child_df
@@ -589,6 +576,18 @@ elif st.session_state.view_mode == "Object Explorer":
                                 filtered_child_df = filtered_child_df[filtered_child_df['Class'].isin(child_class_filter)]
                             if child_status_filter:
                                 filtered_child_df = filtered_child_df[filtered_child_df['Status'].isin(child_status_filter)]
+                                
+                            # Apply sorting to children
+                            if child_sort_by == "Index":
+                                filtered_child_df = filtered_child_df.sort_values('Index')
+                            elif child_sort_by == "Class":
+                                filtered_child_df = filtered_child_df.sort_values('Class')
+                            elif child_sort_by == "Name":
+                                filtered_child_df = filtered_child_df.sort_values('Name')
+                            elif child_sort_by == "Status":
+                                filtered_child_df = filtered_child_df.sort_values('Status')
+                            elif child_sort_by == "Children (desc)":
+                                filtered_child_df = filtered_child_df.sort_values('Children', ascending=False)
                             
                             # Display filtered children table
                             if not filtered_child_df.empty:
