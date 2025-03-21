@@ -744,7 +744,15 @@ elif nav_option == "Objects & Extraction":
                                 
                                 with col2:
                                     if st.button("Extract Selected Children"):
-                                        # Extract the selected children to a file
+                                        # First update status if requested
+                                        if new_status != "No change":
+                                            status_value = None if new_status == "None (remove status)" else new_status
+                                            if parser.set_multiple_child_children_status(parent_index, child_indices, status_value):
+                                                st.success(f"Status set to: {status_value or 'None'} for all selected children")
+                                            else:
+                                                st.warning("Status updates may have been incomplete")
+                                        
+                                        # Then extract the selected children to a file
                                         temp_file = os.path.join(tempfile.gettempdir(), output_filename)
                                         success, count = parser.extract_child_children_to_file(parent_index, child_indices, temp_file)
                                         
