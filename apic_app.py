@@ -99,6 +99,21 @@ def save_and_download_config(parser, output_filename):
         st.error(f"Error saving configuration: {str(e)}")
         return False
 
+# Define status options once for reuse
+STATUS_OPTIONS = [
+    "No change",
+    "created", 
+    "modified, created", 
+    "deleted", 
+    "None (remove status)"
+]
+
+# Initialize session state
+if "parser" not in st.session_state:
+    st.session_state.parser = None
+    st.session_state.config_file = None
+    st.session_state.filename = None
+
 # Sidebar for file selection and general options
 st.sidebar.title("APIC Parser")
 
@@ -110,12 +125,6 @@ sample_file = st.sidebar.selectbox(
     "Or select a sample file:",
     ["None", "tn-Datacenter1.json"]
 )
-
-# Initialize session state for parser
-if "parser" not in st.session_state:
-    st.session_state.parser = None
-    st.session_state.config_file = None
-    st.session_state.filename = None
 
 # Handle file upload
 if uploaded_file is not None:
@@ -203,7 +212,7 @@ elif nav_option == "Objects & Extraction":
     if parser.objects and parser.objects[0]['children']:
         children = parser.objects[0]['children']
         
-        # Create a dataframe for the table view
+        # Create a dataframe for the table view - optimize by collecting all records first
         records = []
         for i, child in enumerate(children):
             record = {
@@ -243,15 +252,6 @@ elif nav_option == "Objects & Extraction":
             
         # Display table
         st.dataframe(filtered_df, use_container_width=True)
-        
-        # Status options for modification
-        status_options = [
-            "No change",
-            "created", 
-            "modified, created", 
-            "deleted", 
-            "None (remove status)"
-        ]
         
         # Extraction and modification tabs
         object_tabs = st.tabs(["Object Details", "Extract & Modify", "Class Operations", "Children Manager"])
@@ -327,7 +327,7 @@ elif nav_option == "Objects & Extraction":
                         with col1:
                             new_status = st.selectbox(
                                 "Set status (optional):",
-                                options=status_options
+                                options=STATUS_OPTIONS
                             )
                         
                         with col2:
@@ -391,13 +391,13 @@ elif nav_option == "Objects & Extraction":
                         with col1:
                             new_status = st.selectbox(
                                 "Set status for all selected objects (optional):",
-                                options=status_options
+                                options=STATUS_OPTIONS
                             )
                         
                         with col2:
                             output_filename = st.text_input(
                                 "Output filename:", 
-                                f"objects_{'-'.join(str(i) for i in indices)}.json"
+                                f"objects_{'-'.join(str(i) for i in indices[:3])}" + (f"_plus_{len(indices)-3}_more" if len(indices) > 3 else "") + ".json"
                             )
                         
                         # Action buttons
@@ -522,7 +522,7 @@ elif nav_option == "Objects & Extraction":
                     with col1:
                         class_status = st.selectbox(
                             f"Set status for selected objects:",
-                            options=status_options
+                            options=STATUS_OPTIONS
                         )
                     
                     with col2:
@@ -575,6 +575,7 @@ elif nav_option == "Objects & Extraction":
                     st.info(f"Please select one or more objects to perform operations")
             elif class_filter or 'selected_class' in locals():
                 st.info("No objects available with the current filters. Please adjust your filter criteria.")
+        
         with object_tabs[3]:  # Children Manager tab
             st.subheader("Manage Children Objects")
             st.write("Create, delete, or modify children within objects")
@@ -652,7 +653,8 @@ elif nav_option == "Objects & Extraction":
                         # Selection mode
                         selection_mode = st.radio(
                             "Selection mode:",
-                            ["Single Child", "Multiple Children"]
+                            ["Single Child", "Multiple Children"],
+                            key="child_selection_mode"  # Unique key to avoid conflicts
                         )
                         
                         if selection_mode == "Single Child":
@@ -677,7 +679,8 @@ elif nav_option == "Objects & Extraction":
                                 with col1:
                                     new_status = st.selectbox(
                                         "Set status for this child:",
-                                        options=status_options
+                                        options=STATUS_OPTIONS,
+                                        key="single_child_status"  # Unique key
                                     )
                                 
                                 # Action buttons
@@ -717,7 +720,8 @@ elif nav_option == "Objects & Extraction":
                                 with col1:
                                     new_status = st.selectbox(
                                         "Set status for selected children:",
-                                        options=status_options
+                                        options=STATUS_OPTIONS,
+                                        key="multi_child_status"  # Unique key
                                     )
                                 
                                 with col2:

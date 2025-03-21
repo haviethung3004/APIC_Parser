@@ -9,6 +9,7 @@ APIC Parser is designed to help network administrators and automation engineers 
 - Parse and analyze ACI configuration files
 - Extract specific child objects by index
 - Extract multiple child objects simultaneously
+- Manage nested children objects within parent objects
 - Search for objects by class name
 - Generate summaries of configuration hierarchies
 - Export configurations to separate files
@@ -130,18 +131,46 @@ python apic_parser.py -f your_config.json -m "2,4,6" --set-status "modified, cre
 
 ## Web Interface Features
 
-The Streamlit-based web interface provides a user-friendly way to interact with ACI configuration files:
+The Streamlit-based web interface provides a user-friendly way to interact with ACI configuration files through several tabs:
 
-- **File Upload**: Upload your ACI configuration JSON files
-- **Sample Files**: Load included sample configurations
-- **Summary View**: Visual summary of the configuration with charts
-- **Child Objects**: View and manage all child objects
-- **Extract Child**: Extract and download specific child objects
-- **Class Search**: Search for objects by class name
-- **Status Management**: Set status attributes for objects easily and save changes
+### Summary Tab
+- Visual summaries of your configuration with charts
+- Object class distribution overview
+- Root object details with expandable sections
 
-## Multiple Object Selection Feature
+### Objects & Extraction Tab
+- Filter objects by class and status
+- View details of any selected object
+- Extract individual or multiple objects with a single click
 
+#### Object Details Subtab
+- View detailed information about selected objects 
+- Inspect attributes and children of objects
+- View raw JSON configuration
+
+#### Extract & Modify Subtab
+- Single object or multi-object selection modes
+- Preview configurations before extraction
+- Set status attributes (create, modify, delete)
+- Export configurations to downloadable JSON files
+- Save changes back to the original configuration
+
+#### Class Operations Subtab
+- Filter and work with objects of a specific class
+- Perform bulk operations on objects of the same class
+- Set status attributes for multiple objects simultaneously
+
+#### Children Manager Subtab
+- Manage nested children of parent objects (like fvAP objects)
+- View the hierarchical structure of complex objects
+- Sort parent objects by number of children
+- Select and modify individual or multiple nested children
+- Extract nested children with updated status values
+- Apply status changes to multiple nested children at once
+
+## Object Selection Features
+
+### Multiple Object Selection
 The multiple object selection feature allows you to work with several objects simultaneously:
 
 - Extract multiple objects from a configuration into a single combined JSON file
@@ -149,10 +178,14 @@ The multiple object selection feature allows you to work with several objects si
 - Maintain the hierarchical structure of the original configuration
 - Preserve the parent object's attributes while including only the selected child objects
 
-This feature is especially useful when you need to:
-- Generate configuration snippets with related objects
-- Apply the same status to groups of related objects
-- Create template configurations with specific object combinations
+### Children Management
+The children management feature allows you to:
+
+- Visualize and navigate the nested hierarchy of complex ACI objects
+- Perform operations on deeply nested children (3+ levels deep)
+- Extract specific children from parent objects that might have hundreds of children
+- Apply status changes to children objects while maintaining their relationships
+- Export selected children configurations for later use
 
 ## Status Attribute Feature
 
@@ -189,6 +222,16 @@ APIC_Parser/
 - **ACIObjectExtractor**: Handles the extraction of objects from the configuration hierarchy
 - **ACIObject**: Data model representing an ACI object with its attributes and children
 - **TenantConfig**: Represents a full tenant configuration with its child objects
+
+## Performance Optimizations
+
+The application includes several optimizations to handle large configuration files efficiently:
+
+- Lazy loading of large object trees
+- Efficient filtering of object collections
+- Smart status propagation through object hierarchies
+- Optimized JSON handling for large configurations
+- Selective extraction of nested objects without loading entire trees
 
 ## Development
 
