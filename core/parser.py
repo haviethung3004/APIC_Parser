@@ -5,43 +5,80 @@ import argparse
 import os
 import sys
 import json
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Generator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 
 # Import from our modules
 from core.extractors import ACIObjectExtractor
 from core.models import ACIObject, TenantConfig
 from utils.file_utils import load_json_config, save_json_config
 
-
 class ACIConfigParser:
     """Main parser class for ACI configuration files"""
     
-    def __init__(self, config_file: str):
+    def __init__(self, config_file: str, batch_size: int = 1000):
         """
         Initialize the parser with a configuration file
         
         Args:
             config_file: Path to the JSON configuration file
+            batch_size: Size of batches for processing large configurations
         """
         self.config_file = config_file
         self.config = None
         self.objects = []
+        self.batch_size = batch_size
+        self._object_iterator = None
+    
+    def _init_object_iterator(self) -> None:
+        """Initialize the object iterator for batch processing"""
+        if self.config:
+            self._object_iterator = ACIObjectExtractor.extract_all_objects(
+                self.config, 
+                batch_size=self.batch_size
+            )
         
-    def load(self) -> bool:
+    def load(self, use_streaming: bool = True) -> bool:
         """
-        Load and parse the configuration file
+        Load and parse the configuration file with memory optimization
         
+        Args:
+            use_streaming: Whether to use streaming parser for large files
+            
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            self.config = load_json_config(self.config_file)
-            self.objects = ACIObjectExtractor.extract_all_objects(self.config)
+            self.config = load_json_config(self.config_file, use_streaming)
+            self._init_object_iterator()
+            # Load first batch of objects
+            self.objects = list(islice(self._object_iterator, self.batch_size))
             return True
         except Exception as e:
             print(f"Error loading configuration: {e}")
             return False
     
+    def load_next_batch(self) -> bool:
+        """
+        Load the next batch of objects from the configuration
+        
+        Returns:
+            bool: True if more objects were loaded, False if no more objects
+        """
+        if not self._object_iterator:
+            return False
+            
+        try:
+            next_batch = list(islice(self._object_iterator, self.batch_size))
+            if next_batch:
+                self.objects.extend(next_batch)
+                return True
+            return False
+        except Exception as e:
+            print(f"Error loading next batch: {e}")
+            return False
+
     def get_child_config(self, parent_index: int = 0, child_index: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Get a specific child's configuration
@@ -350,48 +387,45 @@ class ACIConfigParser:
     
     def get_class_counts(self) -> Dict[str, int]:
         """
-        Get counts of each class in the configuration
+        Get counts of each class in the configuration with batch processing
         
         Returns:
             Dictionary with class names as keys and counts as values
         """
-        if not self.objects:
+        if not self.config:
             return {}
             
         class_counts = {}
         
-        # Count root level objects
-        for obj in self.objects:
-            class_name = obj['class']
-            class_counts[class_name] = class_counts.get(class_name, 0) + 1
-            
-            # Count children
-            for child in obj['children']:
-                child_class = child['class']
-                class_counts[child_class] = class_counts.get(child_class, 0) + 1
+        def count_classes(obj_list: List[Dict]) -> None:
+            for obj in obj_list:
+                class_name = obj.get('class')
+                if class_name:
+                    class_counts[class_name] = class_counts.get(class_name, 0) + 1
                 
-                # Count grandchildren and deeper (recursive)
-                def count_children_classes(obj_list):
-                    for child_obj in obj_list:
-                        if isinstance(child_obj, dict) and 'class' in child_obj:
-                            class_name = child_obj['class']
-                            class_counts[class_name] = class_counts.get(class_name, 0) + 1
-                            # Process children recursively
-                            if 'children' in child_obj and child_obj['children']:
-                                count_children_classes(child_obj['children'])
-                
-                if 'children' in child and child['children']:
-                    count_children_classes(child['children'])
+                # Count children
+                for child in obj.get('children', []):
+                    child_class = child.get('class')
+                    if child_class:
+                        class_counts[child_class] = class_counts.get(child_class, 0) + 1
+        
+        # Process current objects
+        count_classes(self.objects)
+        
+        # Load and process remaining objects in batches
+        while self.load_next_batch():
+            count_classes(self.objects[-self.batch_size:])
                 
         return class_counts
         
-    def extract_child_to_file(self, child_index: int, output_path: str) -> bool:
+    def extract_child_to_file(self, child_index: int, output_path: str, compress: bool = False) -> bool:
         """
         Extract a specific child configuration and save it to a file
         
         Args:
             child_index: Index of the child to extract (0-based)
             output_path: Path where to save the extracted configuration
+            compress: Whether to compress the output JSON
             
         Returns:
             bool: True if successful, False otherwise
@@ -401,30 +435,63 @@ class ACIConfigParser:
             if not child_config:
                 print(f"Child with index {child_index} not found")
                 return False
-                
-            return save_json_config(child_config, output_path)
+            
+            return save_json_config(
+                child_config, 
+                output_path,
+                chunk_size=8192 if not compress else 65536
+            )
         except Exception as e:
             print(f"Error extracting child configuration: {e}")
             return False
             
-    def extract_multiple_children_to_file(self, child_indices: List[int], output_path: str) -> bool:
+    def extract_multiple_children_to_file(self, child_indices: List[int], output_path: str, 
+                                        compress: bool = False, parallel: bool = True) -> bool:
         """
         Extract multiple child configurations and save them as a combined file
         
         Args:
             child_indices: List of child indices to extract (0-based)
             output_path: Path where to save the extracted configuration
+            compress: Whether to compress the output JSON
+            parallel: Whether to extract children in parallel
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            combined_config = self.get_multiple_children_config(child_indices)
-            if not combined_config or not combined_config.get('imdata', []):
+            if parallel and len(child_indices) > 1:
+                # Use ThreadPoolExecutor for parallel extraction
+                with ThreadPoolExecutor(max_workers=min(len(child_indices), os.cpu_count() or 1)) as executor:
+                    configs = list(executor.map(
+                        lambda idx: self.get_child_config(child_index=idx),
+                        child_indices
+                    ))
+            else:
+                configs = [self.get_child_config(child_index=idx) for idx in child_indices]
+            
+            # Filter out None values and combine configs
+            valid_configs = [c for c in configs if c]
+            if not valid_configs:
                 print("No valid children found to extract")
                 return False
-                
-            return save_json_config(combined_config, output_path)
+            
+            # Create combined structure
+            combined_config = {
+                "totalCount": str(len(valid_configs)),
+                "imdata": [
+                    {
+                        list(config.keys())[0]: config[list(config.keys())[0]]
+                    }
+                    for config in valid_configs
+                ]
+            }
+            
+            return save_json_config(
+                combined_config,
+                output_path,
+                chunk_size=8192 if not compress else 65536
+            )
         except Exception as e:
             print(f"Error extracting multiple child configurations: {e}")
             return False
