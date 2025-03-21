@@ -5,7 +5,7 @@ import argparse
 import os
 import sys
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 # Import from our modules
 from core.extractors import ACIObjectExtractor
@@ -138,6 +138,52 @@ class ACIConfigParser:
             
         return ACIObjectExtractor.extract_object(self.config, class_name)
     
+    def get_child_indices_by_class(self, class_name: str) -> List[int]:
+        """
+        Get indices of all children of a specific class
+        
+        Args:
+            class_name: The class name to find (e.g., "fvAP")
+            
+        Returns:
+            List of indices for children matching the specified class
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        indices = []
+        
+        # Check if we have the root object with children
+        if 'imdata' in self.config and isinstance(self.config['imdata'], list) and len(self.config['imdata']) > 0:
+            parent_obj = self.config['imdata'][0]
+            if parent_obj:
+                parent_class = list(parent_obj.keys())[0]
+                if 'children' in parent_obj[parent_class]:
+                    # Iterate through children to find those matching the class
+                    for i, child in enumerate(parent_obj[parent_class]['children']):
+                        if child and len(child) == 1:  # Each child should have one key (class)
+                            child_class = list(child.keys())[0]
+                            if child_class == class_name:
+                                indices.append(i)
+        
+        return indices
+        
+    def get_class_children_config(self, class_name: str) -> Dict[str, Any]:
+        """
+        Get configuration for all children of a specific class
+        
+        Args:
+            class_name: The class name to collect (e.g., "fvAP")
+            
+        Returns:
+            Dictionary containing the combined configuration with all children of the specified class
+        """
+        # Get indices of all children matching the class
+        indices = self.get_child_indices_by_class(class_name)
+        
+        # Use existing function to get the combined config
+        return self.get_multiple_children_config(indices)
+    
     def set_object_status(self, status_value: str, object_path: Optional[List[str]] = None) -> bool:
         """
         Set the status attribute for an object in the configuration
@@ -216,6 +262,25 @@ class ACIConfigParser:
             
         return success
     
+    def set_class_children_status(self, class_name: str, status_value: str) -> bool:
+        """
+        Set the status for all children of a specific class
+        
+        Args:
+            class_name: The class name to target (e.g., "fvAP")
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            bool: True if successful, False otherwise, and count of updated objects
+        """
+        # Get indices of all children matching the class
+        indices = self.get_child_indices_by_class(class_name)
+        
+        # Use existing function to update all children
+        success = self.set_multiple_children_status(indices, status_value)
+        
+        return success, len(indices)
+    
     def save_config(self, output_path: Optional[str] = None) -> bool:
         """
         Save the current configuration to a file
@@ -282,7 +347,44 @@ class ACIConfigParser:
                         print(f"      Status: {child['attributes']['status']}")
                     if child_idx == 19 and len(obj['children']) > 20:
                         print(f"      ... ({len(obj['children']) - 20} more)")
-                        
+    
+    def get_class_counts(self) -> Dict[str, int]:
+        """
+        Get counts of each class in the configuration
+        
+        Returns:
+            Dictionary with class names as keys and counts as values
+        """
+        if not self.objects:
+            return {}
+            
+        class_counts = {}
+        
+        # Count root level objects
+        for obj in self.objects:
+            class_name = obj['class']
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+            
+            # Count children
+            for child in obj['children']:
+                child_class = child['class']
+                class_counts[child_class] = class_counts.get(child_class, 0) + 1
+                
+                # Count grandchildren and deeper (recursive)
+                def count_children_classes(obj_list):
+                    for child_obj in obj_list:
+                        if isinstance(child_obj, dict) and 'class' in child_obj:
+                            class_name = child_obj['class']
+                            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+                            # Process children recursively
+                            if 'children' in child_obj and child_obj['children']:
+                                count_children_classes(child_obj['children'])
+                
+                if 'children' in child and child['children']:
+                    count_children_classes(child['children'])
+                
+        return class_counts
+        
     def extract_child_to_file(self, child_index: int, output_path: str) -> bool:
         """
         Extract a specific child configuration and save it to a file
@@ -326,6 +428,230 @@ class ACIConfigParser:
         except Exception as e:
             print(f"Error extracting multiple child configurations: {e}")
             return False
+    
+    def extract_class_children_to_file(self, class_name: str, output_path: str) -> bool:
+        """
+        Extract all children of a specific class and save them as a combined file
+        
+        Args:
+            class_name: The class name to extract (e.g., "fvAP") 
+            output_path: Path where to save the extracted configuration
+            
+        Returns:
+            bool: True if successful, False otherwise, and count of extracted objects
+        """
+        try:
+            # Get indices of all children matching the class
+            indices = self.get_child_indices_by_class(class_name)
+            
+            if not indices:
+                print(f"No children found with class '{class_name}'")
+                return False, 0
+                
+            # Use existing function to extract all children
+            success = self.extract_multiple_children_to_file(indices, output_path)
+            
+            return success, len(indices)
+        except Exception as e:
+            print(f"Error extracting children of class {class_name}: {e}")
+            return False, 0
+
+    def get_child_children(self, child_index: int) -> List[Dict[str, Any]]:
+        """
+        Get children objects of a specific child by index
+        
+        Args:
+            child_index: Index of the parent child to get children from
+            
+        Returns:
+            List of children objects with their attributes
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            # Get the child configuration
+            child_config = self.get_child_config(child_index=child_index)
+            if not child_config:
+                return []
+                
+            # Extract the children
+            child_class = list(child_config.keys())[0]
+            if 'children' in child_config[child_class]:
+                return child_config[child_class]['children']
+            else:
+                return []
+        except Exception as e:
+            print(f"Error getting child's children: {e}")
+            return []
+    
+    def set_child_child_status(self, child_index: int, child_child_index: int, status_value: str) -> bool:
+        """
+        Set status for a specific child's child by index
+        
+        Args:
+            child_index: Index of the parent child
+            child_child_index: Index of the child's child to update 
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            # Navigate to the main object and its child
+            if 'imdata' in self.config and isinstance(self.config['imdata'], list):
+                parent_obj = self.config['imdata'][0]  # Typically the first object is the parent
+                parent_class = list(parent_obj.keys())[0]
+                
+                if 'children' in parent_obj[parent_class]:
+                    children = parent_obj[parent_class]['children']
+                    
+                    if 0 <= child_index < len(children):
+                        child = children[child_index]
+                        child_class = list(child.keys())[0]
+                        
+                        if 'children' in child[child_class]:
+                            child_children = child[child_class]['children']
+                            
+                            if 0 <= child_child_index < len(child_children):
+                                # Found the child's child, update its status
+                                child_child = child_children[child_child_index]
+                                child_child_class = list(child_child.keys())[0]
+                                
+                                if 'attributes' not in child_child[child_child_class]:
+                                    child_child[child_child_class]['attributes'] = {}
+                                    
+                                if status_value is None:
+                                    # Remove status if set to None
+                                    if 'status' in child_child[child_child_class]['attributes']:
+                                        del child_child[child_child_class]['attributes']['status']
+                                else:
+                                    # Set the status
+                                    child_child[child_child_class]['attributes']['status'] = status_value
+                                    
+                                # Update the objects
+                                self.objects = ACIObjectExtractor.extract_all_objects(self.config)
+                                return True
+            
+            return False
+        except Exception as e:
+            print(f"Error setting child's child status: {e}")
+            return False
+    
+    def set_multiple_child_children_status(self, child_index: int, child_child_indices: List[int], status_value: str) -> bool:
+        """
+        Set status for multiple child's children by indices
+        
+        Args:
+            child_index: Index of the parent child
+            child_child_indices: List of indices for the child's children to update
+            status_value: Status value to set (e.g., "created", "modified, created", "deleted")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        success = True
+        for idx in child_child_indices:
+            result = self.set_child_child_status(child_index, idx, status_value)
+            if not result:
+                success = False
+                
+        return success
+    
+    def get_child_child_config(self, child_index: int, child_child_index: int) -> Dict[str, Any]:
+        """
+        Get the configuration for a specific child's child
+        
+        Args:
+            child_index: Index of the parent child
+            child_child_index: Index of the child's child
+            
+        Returns:
+            Dictionary with the child's child configuration, or empty dict if not found
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            child_children = self.get_child_children(child_index)
+            if child_children and 0 <= child_child_index < len(child_children):
+                return child_children[child_child_index]
+            return {}
+        except Exception as e:
+            print(f"Error getting child's child configuration: {e}")
+            return {}
+    
+    def get_multiple_child_children_config(self, child_index: int, child_child_indices: List[int]) -> Dict[str, Any]:
+        """
+        Get configurations for multiple children of a specific child
+        
+        Args:
+            child_index: Index of the parent child
+            child_child_indices: List of indices for the child's children
+            
+        Returns:
+            Dictionary containing the combined configuration with all selected children
+        """
+        if not self.config:
+            raise ValueError("Configuration not loaded. Call load() first.")
+            
+        try:
+            # Get the child configuration to use as a template
+            child_config = self.get_child_config(child_index=child_index)
+            if not child_config:
+                return {}
+                
+            # Create a copy of the child config without its children
+            child_class = list(child_config.keys())[0]
+            result = {
+                child_class: {
+                    "attributes": child_config[child_class].get("attributes", {}),
+                    "children": []
+                }
+            }
+            
+            # Get each requested child's child and add it to the result
+            child_children = self.get_child_children(child_index)
+            for idx in child_child_indices:
+                if 0 <= idx < len(child_children):
+                    result[child_class]["children"].append(child_children[idx])
+            
+            return result
+        except Exception as e:
+            print(f"Error getting multiple child children configurations: {e}")
+            return {}
+    
+    def extract_child_children_to_file(self, child_index: int, child_child_indices: List[int], output_path: str) -> Tuple[bool, int]:
+        """
+        Extract multiple children of a child and save them to a file
+        
+        Args:
+            child_index: Index of the parent child
+            child_child_indices: List of indices of the child's children to extract
+            output_path: Path where to save the extracted configuration
+            
+        Returns:
+            Tuple of (success, count of extracted objects)
+        """
+        try:
+            config = self.get_multiple_child_children_config(child_index, child_child_indices)
+            if not config:
+                return False, 0
+                
+            # Save the configuration to file
+            if save_json_config(config, output_path):
+                return True, len(child_child_indices)
+            else:
+                return False, 0
+        except Exception as e:
+            print(f"Error extracting child's children: {e}")
+            return False, 0
 
 
 def main():

@@ -254,121 +254,257 @@ elif nav_option == "Objects & Extraction":
         ]
         
         # Extraction and modification tabs
-        object_tabs = st.tabs(["Object Details", "Extract & Modify"])
+        object_tabs = st.tabs(["Object Details", "Extract & Modify", "Class Operations", "Children Manager"])
         
         with object_tabs[0]:  # Object Details tab
-            # Details view for selected object
-            selected_index = st.selectbox(
-                "Select object to view details:",
-                options=filtered_df['Index'].tolist(),
-                format_func=lambda x: f"{x}: {df.loc[df['Index'] == x, 'Class'].iloc[0]} - {df.loc[df['Index'] == x, 'Name'].iloc[0]}"
-            )
-            
-            if selected_index is not None:
-                child = children[selected_index]
-                st.subheader(f"Object Details: {child['attributes'].get('name', f'Object {selected_index}')}")
-                
-                # Show attributes
-                st.write("#### Attributes")
-                st.dataframe(format_attributes_table(child['attributes']), use_container_width=True)
-                
-                # Show children if any
-                if child.get('children'):
-                    st.write(f"#### Children ({len(child['children'])})")
-                    for i, grandchild in enumerate(child['children']):
-                        gc_name = grandchild['attributes'].get('name', f"Child {i}")
-                        gc_class = grandchild['class']
-                        st.write(f"- {gc_name} ({gc_class})")
-                        
-                # Show JSON option
-                if st.checkbox("Show Raw JSON"):
-                    st.json(child)
-        
-        with object_tabs[1]:  # Extract & Modify tab
-            # Create simple list for selection
-            options = []
-            for i, child in enumerate(children):
-                name = child['attributes'].get('name', f"Object {i}")
-                class_name = child['class']
-                status = child['attributes'].get('status', 'None')
-                options.append(f"{i}: {class_name} - {name} | Status: {status}")
-            
-            # Selection mode
-            selection_mode = st.radio(
-                "Selection mode:",
-                ["Single Object", "Multiple Objects"]
-            )
-            
-            if selection_mode == "Single Object":
-                selected = st.selectbox(
-                    "Select object:",
-                    options=options
+            # Details view for selected object - use filtered dataframe
+            if filtered_df.empty:
+                st.info("No objects match the current filters. Please adjust your filter criteria.")
+            else:
+                selected_index = st.selectbox(
+                    "Select object to view details:",
+                    options=filtered_df['Index'].tolist(),
+                    format_func=lambda x: f"{x}: {df.loc[df['Index'] == x, 'Class'].iloc[0]} - {df.loc[df['Index'] == x, 'Name'].iloc[0]}"
                 )
                 
-                if selected:
-                    index = int(selected.split(':')[0])
+                if selected_index is not None:
+                    child = children[selected_index]
+                    st.subheader(f"Object Details: {child['attributes'].get('name', f'Object {selected_index}')}")
                     
-                    # Preview the selected object
-                    with st.expander("Preview", expanded=True):
-                        child_config = parser.get_child_config(child_index=index)
-                        if child_config:
-                            st.json(child_config)
+                    # Show attributes
+                    st.write("#### Attributes")
+                    st.dataframe(format_attributes_table(child['attributes']), use_container_width=True)
                     
-                    # Status modification
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        new_status = st.selectbox(
-                            "Set status (optional):",
-                            options=status_options
-                        )
-                    
-                    with col2:
-                        output_filename = st.text_input("Output filename:", f"object_{index}.json")
-                    
-                    # Action buttons
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("Extract Object"):
-                            # First update status if requested
-                            if new_status != "No change":
-                                status_value = None if new_status == "None (remove status)" else new_status
-                                parser.set_child_status(index, status_value)
-                                st.success(f"Status set to: {status_value or 'None'}")
+                    # Show children if any
+                    if child.get('children'):
+                        st.write(f"#### Children ({len(child['children'])})")
+                        for i, grandchild in enumerate(child['children']):
+                            gc_name = grandchild['attributes'].get('name', f"Child {i}")
+                            gc_class = grandchild['class']
+                            st.write(f"- {gc_name} ({gc_class})")
                             
-                            # Then extract to file
-                            temp_file = os.path.join(tempfile.gettempdir(), output_filename)
-                            if parser.extract_child_to_file(index, temp_file):
-                                with open(temp_file, 'r') as f:
-                                    object_data = json.load(f)
-                                st.success(f"Object extracted successfully!")
-                                st.markdown(
-                                    create_download_link(object_data, output_filename, "Download JSON file"),
-                                    unsafe_allow_html=True
-                                )
-                            else:
-                                st.error("Failed to extract object.")
+                    # Show JSON option
+                    if st.checkbox("Show Raw JSON"):
+                        st.json(child)
+        
+        with object_tabs[1]:  # Extract & Modify tab
+            # Create options list from filtered dataframe
+            if filtered_df.empty:
+                st.info("No objects match the current filters. Please adjust your filter criteria.")
+            else:
+                options = []
+                for _, row in filtered_df.iterrows():
+                    idx = row['Index']
+                    name = row['Name']
+                    class_name = row['Class']
+                    status = row['Status']
+                    options.append(f"{idx}: {class_name} - {name} | Status: {status}")
+                
+                # Selection mode
+                selection_mode = st.radio(
+                    "Selection mode:",
+                    ["Single Object", "Multiple Objects"]
+                )
+                
+                if selection_mode == "Single Object":
+                    selected = st.selectbox(
+                        "Select object:",
+                        options=options
+                    )
                     
-                    with col2:
-                        if st.button("Save to Original Config"):
-                            if new_status != "No change":
-                                status_value = None if new_status == "None (remove status)" else new_status
-                                if parser.set_child_status(index, status_value):
-                                    st.success(f"Status updated to: {status_value or 'None'}")
-                                    save_and_download_config(parser, st.session_state.filename)
+                    if selected:
+                        index = int(selected.split(':')[0])
+                        
+                        # Preview the selected object
+                        with st.expander("Preview", expanded=True):
+                            child_config = parser.get_child_config(child_index=index)
+                            if child_config:
+                                st.json(child_config)
+                        
+                        # Status modification
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            new_status = st.selectbox(
+                                "Set status (optional):",
+                                options=status_options
+                            )
+                        
+                        with col2:
+                            output_filename = st.text_input("Output filename:", f"object_{index}.json")
+                        
+                        # Action buttons
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("Extract Object"):
+                                # First update status if requested
+                                if new_status != "No change":
+                                    status_value = None if new_status == "None (remove status)" else new_status
+                                    parser.set_child_status(index, status_value)
+                                    st.success(f"Status set to: {status_value or 'None'}")
+                                
+                                # Then extract to file
+                                temp_file = os.path.join(tempfile.gettempdir(), output_filename)
+                                if parser.extract_child_to_file(index, temp_file):
+                                    with open(temp_file, 'r') as f:
+                                        object_data = json.load(f)
+                                    st.success(f"Object extracted successfully!")
+                                    st.markdown(
+                                        create_download_link(object_data, output_filename, "Download JSON file"),
+                                        unsafe_allow_html=True
+                                    )
                                 else:
-                                    st.error("Failed to update status")
-                            else:
-                                st.info("No changes to save")
+                                    st.error("Failed to extract object.")
+                        
+                        with col2:
+                            if st.button("Save to Original Config"):
+                                if new_status != "No change":
+                                    status_value = None if new_status == "None (remove status)" else new_status
+                                    if parser.set_child_status(index, status_value):
+                                        st.success(f"Status updated to: {status_value or 'None'}")
+                                        save_and_download_config(parser, st.session_state.filename)
+                                    else:
+                                        st.error("Failed to update status")
+                                else:
+                                    st.info("No changes to save")
+                        
+                else:  # Multiple Objects
+                    selected_indices = st.multiselect(
+                        "Select objects:",
+                        options=options
+                    )
                     
-            else:  # Multiple Objects
+                    if selected_indices:
+                        indices = [int(option.split(':')[0]) for option in selected_indices]
+                        
+                        # Preview the combined objects
+                        with st.expander(f"Preview ({len(indices)} objects selected)", expanded=True):
+                            # Get the combined configuration
+                            combined_config = parser.get_multiple_children_config(indices)
+                            if combined_config:
+                                st.json(combined_config)
+                        
+                        # Status modification
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            new_status = st.selectbox(
+                                "Set status for all selected objects (optional):",
+                                options=status_options
+                            )
+                        
+                        with col2:
+                            output_filename = st.text_input(
+                                "Output filename:", 
+                                f"objects_{'-'.join(str(i) for i in indices)}.json"
+                            )
+                        
+                        # Action buttons
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if st.button("Extract Objects"):
+                                # First update status if requested
+                                if new_status != "No change":
+                                    status_value = None if new_status == "None (remove status)" else new_status
+                                    parser.set_multiple_children_status(indices, status_value)
+                                    st.success(f"Status set to: {status_value or 'None'} for all selected objects")
+                                
+                                # Then extract to file
+                                temp_file = os.path.join(tempfile.gettempdir(), output_filename)
+                                if parser.extract_multiple_children_to_file(indices, temp_file):
+                                    with open(temp_file, 'r') as f:
+                                        combined_data = json.load(f)
+                                    st.success(f"{len(indices)} objects extracted successfully!")
+                                    st.markdown(
+                                        create_download_link(combined_data, output_filename, "Download JSON file"),
+                                        unsafe_allow_html=True
+                                    )
+                                else:
+                                    st.error("Failed to extract objects.")
+                        
+                        with col2:
+                            if st.button("Save to Original Config"):
+                                if new_status != "No change":
+                                    status_value = None if new_status == "None (remove status)" else new_status
+                                    if parser.set_multiple_children_status(indices, status_value):
+                                        st.success(f"Status updated to: {status_value or 'None'} for all selected objects")
+                                        save_and_download_config(parser, st.session_state.filename)
+                                    else:
+                                        st.error("Failed to update status for some or all objects")
+                                else:
+                                    st.info("No changes to save")
+        
+        with object_tabs[2]:  # Class Operations tab
+            st.subheader("Class-Based Operations")
+            
+            # If class filters are already applied, use them
+            if class_filter:
+                # Use the first class filter if multiple are selected
+                default_class = class_filter[0]
+                st.write(f"Working with class: **{default_class}** (from filter)")
+                
+                # Filter the objects by the selected class
+                class_filtered_df = filtered_df[filtered_df['Class'] == default_class]
+                
+                if not class_filtered_df.empty:
+                    st.write(f"Found **{len(class_filtered_df)}** objects of class **{default_class}**")
+                    
+                    # Display the filtered objects
+                    st.dataframe(class_filtered_df, use_container_width=True)
+                    
+                    # Create selection options for objects of this class
+                    class_options = []
+                    for _, row in class_filtered_df.iterrows():
+                        idx = row['Index']
+                        name = row['Name']
+                        status = row['Status']
+                        class_options.append(f"{idx}: {default_class} - {name} | Status: {status}")
+                else:
+                    st.warning(f"No objects found with class {default_class}")
+                    class_options = []
+            else:
+                # If no class filter applied, allow user to select a class
+                selected_class = st.selectbox(
+                    "Filter by Class:",
+                    options=sorted(df['Class'].unique())
+                )
+                
+                # Filter objects for the selected class but also respect other filters
+                base_filtered_df = df
+                if status_filter:
+                    base_filtered_df = base_filtered_df[base_filtered_df['Status'].isin(status_filter)]
+                    
+                class_filtered_df = base_filtered_df[base_filtered_df['Class'] == selected_class]
+                
+                if not class_filtered_df.empty:
+                    st.write(f"Found **{len(class_filtered_df)}** objects of class **{selected_class}**")
+                    
+                    # Display the filtered objects
+                    st.dataframe(class_filtered_df, use_container_width=True)
+                    
+                    # Create selection options for objects of this class
+                    class_options = []
+                    for _, row in class_filtered_df.iterrows():
+                        idx = row['Index']
+                        name = row['Name']
+                        status = row['Status']
+                        class_options.append(f"{idx}: {selected_class} - {name} | Status: {status}")
+                else:
+                    st.warning(f"No objects found with class {selected_class}")
+                    class_options = []
+            
+            # Continue with the selection and actions if we have options
+            if class_options:
+                # Selection of specific objects
                 selected_indices = st.multiselect(
-                    "Select objects:",
-                    options=options
+                    f"Select objects to modify:",
+                    options=class_options
                 )
                 
                 if selected_indices:
+                    # Extract the indices from the selection
                     indices = [int(option.split(':')[0]) for option in selected_indices]
                     
                     # Preview the combined objects
@@ -381,53 +517,247 @@ elif nav_option == "Objects & Extraction":
                     # Status modification
                     col1, col2 = st.columns(2)
                     
+                    class_name = default_class if 'default_class' in locals() else selected_class
+                    
                     with col1:
-                        new_status = st.selectbox(
-                            "Set status for all selected objects (optional):",
+                        class_status = st.selectbox(
+                            f"Set status for selected objects:",
                             options=status_options
                         )
                     
                     with col2:
-                        output_filename = st.text_input(
+                        class_output_filename = st.text_input(
                             "Output filename:", 
-                            f"objects_{'-'.join(str(i) for i in indices)}.json"
+                            f"{class_name}_selected_objects.json"
                         )
                     
-                    # Action buttons
+                    # Action buttons for selected objects
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        if st.button("Extract Objects"):
+                        if st.button(f"Extract Selected Objects"):
                             # First update status if requested
-                            if new_status != "No change":
-                                status_value = None if new_status == "None (remove status)" else new_status
-                                parser.set_multiple_children_status(indices, status_value)
-                                st.success(f"Status set to: {status_value or 'None'} for all selected objects")
+                            if class_status != "No change":
+                                status_value = None if class_status == "None (remove status)" else class_status
+                                success = parser.set_multiple_children_status(indices, status_value)
+                                if success:
+                                    st.success(f"Status set to: {status_value or 'None'} for selected objects")
+                                else:
+                                    st.warning("Status updates may have been incomplete")
                             
-                            # Then extract to file
-                            temp_file = os.path.join(tempfile.gettempdir(), output_filename)
+                            # Then extract selected objects to file
+                            temp_file = os.path.join(tempfile.gettempdir(), class_output_filename)
                             if parser.extract_multiple_children_to_file(indices, temp_file):
                                 with open(temp_file, 'r') as f:
-                                    combined_data = json.load(f)
+                                    class_data = json.load(f)
                                 st.success(f"{len(indices)} objects extracted successfully!")
                                 st.markdown(
-                                    create_download_link(combined_data, output_filename, "Download JSON file"),
+                                    create_download_link(class_data, class_output_filename, "Download JSON file"),
                                     unsafe_allow_html=True
                                 )
                             else:
-                                st.error("Failed to extract objects.")
+                                st.error(f"Failed to extract objects")
                     
                     with col2:
-                        if st.button("Save to Original Config"):
-                            if new_status != "No change":
-                                status_value = None if new_status == "None (remove status)" else new_status
-                                if parser.set_multiple_children_status(indices, status_value):
-                                    st.success(f"Status updated to: {status_value or 'None'} for all selected objects")
+                        if st.button(f"Save Changes to Config"):
+                            if class_status != "No change":
+                                status_value = None if class_status == "None (remove status)" else class_status
+                                success = parser.set_multiple_children_status(indices, status_value)
+                                
+                                if success:
+                                    st.success(f"Status updated to: {status_value or 'None'} for selected objects")
                                     save_and_download_config(parser, st.session_state.filename)
                                 else:
-                                    st.error("Failed to update status for some or all objects")
+                                    st.error(f"Failed to update status for some or all selected objects")
                             else:
                                 st.info("No changes to save")
+                else:
+                    st.info(f"Please select one or more objects to perform operations")
+            elif class_filter or 'selected_class' in locals():
+                st.info("No objects available with the current filters. Please adjust your filter criteria.")
+        with object_tabs[3]:  # Children Manager tab
+            st.subheader("Manage Children Objects")
+            st.write("Create, delete, or modify children within objects")
+            
+            # Step 1: Select parent object
+            if filtered_df.empty:
+                st.info("No objects match the current filters. Please adjust your filter criteria.")
+            else:
+                # Sort filtered objects by the number of children in descending order
+                filtered_df_sorted = filtered_df.sort_values('Children', ascending=False)
+                
+                # Select a parent object
+                parent_options = []
+                for _, row in filtered_df_sorted.iterrows():
+                    idx = row['Index']
+                    name = row['Name']
+                    class_name = row['Class']
+                    children_count = row['Children']
+                    parent_options.append(f"{idx}: {class_name} - {name} | Children: {children_count}")
+                
+                selected_parent = st.selectbox(
+                    "Select object with children:",
+                    options=parent_options
+                )
+                
+                if selected_parent:
+                    parent_index = int(selected_parent.split(':')[0])
+                    parent_obj = children[parent_index]
+                    parent_name = parent_obj['attributes'].get('name', f'Object {parent_index}')
+                    parent_class = parent_obj['class']
+                    parent_children_count = len(parent_obj.get('children', []))
+                    
+                    st.subheader(f"Children of {parent_class} - {parent_name}")
+                    st.write(f"Managing {parent_children_count} children objects")
+                    
+                    # Get children of the selected parent
+                    child_children = parser.get_child_children(parent_index)
+                    
+                    if not child_children:
+                        st.info(f"No children found for this {parent_class} object.")
+                    else:
+                        # Create a dataframe of the children
+                        child_records = []
+                        for i, child in enumerate(child_children):
+                            if child and len(child) == 1:  # Each child should have one key (class)
+                                child_class = list(child.keys())[0]
+                                child_data = child[child_class]
+                                child_attributes = child_data.get('attributes', {})
+                                child_children_count = len(child_data.get('children', []))
+                                child_records.append({
+                                    'Index': i,
+                                    'Class': child_class,
+                                    'Name': child_attributes.get('name', f"Child {i}"),
+                                    'Status': child_attributes.get('status', 'N/A'),
+                                    'Children': child_children_count
+                                })
+                        
+                        child_df = pd.DataFrame(child_records)
+                        
+                        # Display children table
+                        st.dataframe(child_df, use_container_width=True)
+                        
+                        # Child operations section
+                        st.subheader("Child Operations")
+                        
+                        # Create selection options for children
+                        child_options = []
+                        for _, row in child_df.iterrows():
+                            idx = row['Index']
+                            name = row['Name']
+                            child_class = row['Class']
+                            status = row['Status']
+                            child_options.append(f"{idx}: {child_class} - {name} | Status: {status}")
+                        
+                        # Selection mode
+                        selection_mode = st.radio(
+                            "Selection mode:",
+                            ["Single Child", "Multiple Children"]
+                        )
+                        
+                        if selection_mode == "Single Child":
+                            # Single child selection
+                            selected_child = st.selectbox(
+                                "Select child:",
+                                options=child_options
+                            )
+                            
+                            if selected_child:
+                                child_index = int(selected_child.split(':')[0])
+                                
+                                # Preview the selected child
+                                with st.expander("Preview Child Object", expanded=True):
+                                    child_config = parser.get_child_child_config(parent_index, child_index)
+                                    if child_config:
+                                        st.json(child_config)
+                                
+                                # Status modification
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    new_status = st.selectbox(
+                                        "Set status for this child:",
+                                        options=status_options
+                                    )
+                                
+                                # Action buttons
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    if st.button("Update Child Status"):
+                                        if new_status != "No change":
+                                            status_value = None if new_status == "None (remove status)" else new_status
+                                            if parser.set_child_child_status(parent_index, child_index, status_value):
+                                                st.success(f"Status set to: {status_value or 'None'}")
+                                                # Re-save the configuration
+                                                save_and_download_config(parser, st.session_state.filename)
+                                            else:
+                                                st.error("Failed to update child status")
+                                        else:
+                                            st.info("No changes made")
+                        else:
+                            # Multiple children selection
+                            selected_children = st.multiselect(
+                                "Select children:",
+                                options=child_options
+                            )
+                            
+                            if selected_children:
+                                child_indices = [int(option.split(':')[0]) for option in selected_children]
+                                
+                                # Preview the combined children
+                                with st.expander(f"Preview ({len(child_indices)} children selected)", expanded=True):
+                                    combined_config = parser.get_multiple_child_children_config(parent_index, child_indices)
+                                    if combined_config:
+                                        st.json(combined_config)
+                                
+                                # Status modification
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    new_status = st.selectbox(
+                                        "Set status for selected children:",
+                                        options=status_options
+                                    )
+                                
+                                with col2:
+                                    output_filename = st.text_input(
+                                        "Output filename:", 
+                                        f"children_of_{parent_class}_{parent_index}.json"
+                                    )
+                                
+                                # Action buttons
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    if st.button("Update Children Status"):
+                                        if new_status != "No change":
+                                            status_value = None if new_status == "None (remove status)" else new_status
+                                            if parser.set_multiple_child_children_status(parent_index, child_indices, status_value):
+                                                st.success(f"Status set to: {status_value or 'None'} for all selected children")
+                                                # Re-save the configuration
+                                                save_and_download_config(parser, st.session_state.filename)
+                                            else:
+                                                st.error("Failed to update some or all children statuses")
+                                        else:
+                                            st.info("No changes made")
+                                
+                                with col2:
+                                    if st.button("Extract Selected Children"):
+                                        # Extract the selected children to a file
+                                        temp_file = os.path.join(tempfile.gettempdir(), output_filename)
+                                        success, count = parser.extract_child_children_to_file(parent_index, child_indices, temp_file)
+                                        
+                                        if success:
+                                            with open(temp_file, 'r') as f:
+                                                children_data = json.load(f)
+                                            st.success(f"{count} children extracted successfully!")
+                                            st.markdown(
+                                                create_download_link(children_data, output_filename, "Download JSON file"),
+                                                unsafe_allow_html=True
+                                            )
+                                        else:
+                                            st.error("Failed to extract children")
     else:
         st.warning("No child objects found in the configuration.")
 
