@@ -376,46 +376,71 @@ def set_status_for_nested_objects(results, object_paths, status_type):
         
     status_value = "deleted" if status_type == "delete" else "created,modified"
     
-    # Process each object path
+    # Organize paths by their structure
+    top_level_paths = []
+    nested_paths = {}
+    
     for path in object_paths:
         path_parts = path.split("/")
-        
-        # Handle the root object (first part of the path)
-        if ":" in path_parts[0]:
-            obj_type, obj_name = path_parts[0].split(":")
+        if len(path_parts) == 1:
+            # This is a top-level object (e.g., "fvAp:WebServer")
+            top_level_paths.append(path)
+        else:
+            # This is a nested path (e.g., "fvAp:WebServer/fvAEPg:EPG_123")
+            root_part = path_parts[0]
+            if root_part not in nested_paths:
+                nested_paths[root_part] = []
+            nested_paths[root_part].append(path_parts[1:])
+    
+    # Process each tenant
+    for tenant in results["imdata"]:
+        if "fvTenant" in tenant and "children" in tenant["fvTenant"]:
+            tenant_children = tenant["fvTenant"]["children"]
             
-            # Find the object in the tenant children
-            for tenant in results["imdata"]:
-                if "fvTenant" in tenant and "children" in tenant["fvTenant"]:
-                    tenant_children = tenant["fvTenant"]["children"]
+            # First process all top-level paths
+            for path in top_level_paths:
+                if ":" in path:
+                    obj_type, obj_name = path.split(":")
                     
-                    # Look for the root object
+                    # Look for the top-level object
                     for child in tenant_children:
                         if obj_type in child and "attributes" in child[obj_type]:
                             if child[obj_type]["attributes"].get("name") == obj_name:
-                                # Set status on the root object
+                                # Set status on the top-level object
                                 child[obj_type]["attributes"]["status"] = status_value
                                 print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
-                                
-                                # If there are nested paths, process them
-                                if len(path_parts) > 1 and "children" in child[obj_type]:
-                                    _process_nested_path(child[obj_type]["children"], path_parts[1:], status_value)
-                                
+                                break
+            
+            # Then process all nested paths
+            for root_path, child_paths in nested_paths.items():
+                if ":" in root_path:
+                    obj_type, obj_name = root_path.split(":")
+                    
+                    # Find the parent object
+                    for child in tenant_children:
+                        if obj_type in child and "attributes" in child[obj_type]:
+                            if child[obj_type]["attributes"].get("name") == obj_name:
+                                # We found the parent, now process its children
+                                # Note: We do NOT set status on the parent for nested paths
+                                if "children" in child[obj_type]:
+                                    for nested_path in child_paths:
+                                        _process_nested_path_only(child[obj_type]["children"], nested_path, status_value)
                                 break
     
     return results
 
 
-def _process_nested_path(children, path_parts, status_value):
+def _process_nested_path_only(children, path_parts, status_value):
     """
-    Helper function to process nested paths for setting status attributes.
+    Helper function to process nested paths for setting status attributes
+    without modifying parent objects.
     
     Args:
         children (list): The children array to search through
         path_parts (list): Remaining parts of the object path
         status_value (str): Status value to set
     """
-    if not path_parts:
+    if not path_parts or not children:
         return
         
     # Get the current part to process
@@ -432,7 +457,7 @@ def _process_nested_path(children, path_parts, status_value):
                     
                     # Continue with next level if exists
                     if len(path_parts) > 1 and "children" in child[obj_type]:
-                        _process_nested_path(child[obj_type]["children"], path_parts[1:], status_value)
+                        _process_nested_path_only(child[obj_type]["children"], path_parts[1:], status_value)
                     
                     break
 

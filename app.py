@@ -111,8 +111,19 @@ def search_objects(data, object_type, object_names, status_type=None):
         
     return formatted_results if results else None
 
-def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None):
-    """Search for Application Profile with all its nested children"""
+def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None, only_update_nested=False):
+    """Search for Application Profile with all its nested children
+    
+    Args:
+        data: The parsed data
+        ap_name: Name of the Application Profile
+        status_type: Status type to set (create or delete)
+        nested_paths: List of object paths to update status
+        only_update_nested: If True, don't set status on the AP itself even if it's in nested_paths
+        
+    Returns:
+        The formatted results with updated status
+    """
     if not ap_name:
         st.warning("Please provide an Application Profile name.")
         return None
@@ -126,6 +137,10 @@ def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None):
         # Apply status to AP and nested objects if requested
         if status_type and formatted_results and formatted_results["totalCount"] != "0":
             if nested_paths:
+                # If only_update_nested is True, filter out the AP path if present
+                if only_update_nested:
+                    nested_paths = [p for p in nested_paths if not p.startswith(f"fvAp:{ap_name}$")]
+                
                 formatted_results = set_status_for_nested_objects(formatted_results, nested_paths, status_type)
             else:
                 # Just set status on the AP itself
@@ -363,7 +378,8 @@ def main():
                                     st.session_state.parsed_data,
                                     selected_ap,
                                     status_type=status_type if (set_ap_status or set_epg_status) else None,
-                                    nested_paths=object_paths
+                                    nested_paths=object_paths,
+                                    only_update_nested=set_epg_status and not set_ap_status
                                 )
                                 
                                 if results:
