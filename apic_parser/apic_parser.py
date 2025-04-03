@@ -1,22 +1,21 @@
 import ijson
 import json
+import os
 
-
-def has_nested_children(obj):
-    """
-    Check if the object has nested children
-    """
-    for key, value in obj.items():
-        if isinstance(value, dict) and "children" in value:
-            return True, value["children"]
-    return False, None
 
 
 def build_nested_object(file_path):
-
+    """
+    Build a nested Python object from an APIC JSON file using streaming parser.
+    
+    Args:
+        file_path (str): Path to the APIC JSON file to parse.
+        
+    Returns:
+        dict: The parsed nested object representation of the JSON file.
+    """
     with open(file_path, 'rb') as file:
         parser = ijson.parse(file)
-
         stack = []
         result = None
         
@@ -53,9 +52,16 @@ def build_nested_object(file_path):
                         parent.append(value)
         return result
 
+
 def get_top_level_objects(data):
     """
-    Get the top-level objects from the tenant data
+    Get the top-level objects from the tenant data.
+    
+    Args:
+        data (dict): The nested object data structure built from the APIC JSON file.
+        
+    Returns:
+        list: A list of dictionaries representing the top-level objects in the tenant.
     """
     top_level = []
     try:
@@ -74,15 +80,13 @@ def get_top_level_objects(data):
     return top_level
 
 
-
-
 def find_all_objects_by_name_iterative(data, object_type, names_list):
     """
     Find ALL objects matching the type (key) and ANY of the names
-    provided in the names_list (in attributes). Uses an iterative DFS.
+    provided in the names_list (in attributes). Uses an iterative DFS approach.
 
     Args:
-        data: The nested dictionary/list structure to search within.
+        data (dict): The nested dictionary/list structure to search within.
         object_type (str): The dictionary key identifying the object type (e.g., 'fvBD').
         names_list (list): A list of strings, where each string is a potential 'name'
                            attribute value to match (e.g., ['BD_484', 'BD791']).
@@ -96,8 +100,8 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
 
     # Make the names_list a set for potentially faster 'in' checks, especially with many names
     names_set = set(names_list)
-
-    # print(f"Searching for ALL objects: Type='{object_type}', Name(s) in {names_set}")
+    
+    print(f"Searching for objects of type '{object_type}' with names: {', '.join(names_list)}")
 
     while stack:
         current_obj, _ = stack.pop()
@@ -105,15 +109,14 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
         if isinstance(current_obj, dict):
             for key, value in current_obj.items():
                 if key == object_type and isinstance(value, dict) and "attributes" in value:
-                    # --- CHANGE HERE: Check if name is IN the list/set ---
+                    # Check if name is in the list/set of requested names
                     object_actual_name = value.get("attributes", {}).get("name")
-                    # Check if the actual name exists and is one of the names we're looking for
                     if object_actual_name is not None and object_actual_name in names_set:
-                        print(f"  -> Found a match: Key='{key}', Name='{object_actual_name}'. Adding to results.")
+                        print(f"  -> Found a match: '{object_actual_name}'")
                         found_objects.append({key: value})
-                        # Continue searching
+                        # Continue searching for other matches
 
-                # Keep Digging Deeper
+                # Keep exploring deeper in the hierarchy
                 if isinstance(value, (dict, list)):
                     stack.append((value, key))
 
@@ -122,16 +125,26 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
                 if isinstance(item, (dict, list)):
                     stack.append((item, None))
 
-    # print(f"Search complete. Found {len(found_objects)} matching object(s).")
+    print(f"Found {len(found_objects)} matching object(s).")
     return found_objects
+
 
 def find_object_by_name_iterative(data, object_type, name):
     """
-    Find an object by its type (e.g., 'fvBD') and name (e.g., 'BD_484') using an iterative stack-based approach.
-    Returns the full object as it appears in the original JSON, or None if not found.
+    Find a single object by its type and name using an iterative stack-based approach.
+    
+    Args:
+        data (dict): The nested dictionary/list structure to search within.
+        object_type (str): The dictionary key identifying the object type (e.g., 'fvBD').
+        name (str): The name attribute value to match (e.g., 'BD_484').
+        
+    Returns:
+        dict: The found object as it appears in the original JSON, or None if not found.
     """
     # Stack holds tuples of (object, key) to explore
     stack = [(data, None)]  # Start with the root object, no key yet
+    
+    print(f"Searching for object of type '{object_type}' with name '{name}'")
     
     while stack:
         current_obj, parent_key = stack.pop()  # Get the next object to check
@@ -141,16 +154,49 @@ def find_object_by_name_iterative(data, object_type, name):
                 # Check if this is the target object
                 if key == object_type and "attributes" in value:
                     if value["attributes"].get("name") == name:
+                        print(f"  -> Found a match: '{name}'")
                         return {key: value}  # Found it, return the full object
                 # Add nested dictionaries to the stack
-                stack.append((value, key))
+                if isinstance(value, (dict, list)):
+                    stack.append((value, key))
         
         elif isinstance(current_obj, list):
             # Add each item in the list to the stack
             for item in current_obj:
-                stack.append((item, None))  # No key for list items
+                if isinstance(item, (dict, list)):
+                    stack.append((item, None))  # No key for list items
     
+    print(f"No object of type '{object_type}' with name '{name}' found.")
     return None  # Not found
+
+
+def get_tenant_info():
+    """
+    Get tenant information from the nested_object.json file.
+    
+    Returns:
+        dict: The tenant attributes, or default values if the file can't be read.
+    """
+    # Default tenant info if we can't get it from the file
+    default_tenant_info = {
+        "name": "Datacenter1",
+        "status": "created,modified"
+    }
+    
+    try:
+        nested_object_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'nested_object.json')
+        with open(nested_object_path, 'r') as f:
+            original_data = json.load(f)
+            if "imdata" in original_data and len(original_data["imdata"]) > 0:
+                if "fvTenant" in original_data["imdata"][0]:
+                    # Extract tenant attributes from original file
+                    tenant_info = original_data["imdata"][0]["fvTenant"]["attributes"]
+                    return tenant_info
+    except Exception as e:
+        print(f"Warning: Could not extract tenant information from nested_object.json: {e}")
+    
+    return default_tenant_info
+
 
 def format_result_in_apic_standard(result):
     """
@@ -161,7 +207,7 @@ def format_result_in_apic_standard(result):
         result: The found object, a list of objects, or None if not found
     
     Returns:
-        A dictionary in standard APIC format with the result(s) wrapped in fvTenant and imdata
+        dict: A dictionary in standard APIC format with the result(s) wrapped in fvTenant and imdata
     """
     if result is None:
         return {
@@ -182,24 +228,7 @@ def format_result_in_apic_standard(result):
         }
     
     # Get tenant information from the original data
-    tenant_info = None
-    try:
-        with open(r'C:\Users\dsu979\Documents\APIC\APIC_Parser\nested_object.json', 'r') as f:
-            import json
-            original_data = json.load(f)
-            if "imdata" in original_data and len(original_data["imdata"]) > 0:
-                if "fvTenant" in original_data["imdata"][0]:
-                    # Extract tenant attributes from original file
-                    tenant_info = original_data["imdata"][0]["fvTenant"]["attributes"]
-    except Exception as e:
-        print(f"Warning: Could not extract tenant information from nested_object.json: {e}")
-    
-    # Create default tenant attributes if we couldn't get them from the file
-    if tenant_info is None:
-        tenant_info = {
-            "name": "Datacenter1",
-            "status": "created,modified"
-        }
+    tenant_info = get_tenant_info()
     
     # Create fvTenant wrapper with children containing all results
     tenant_wrapper = {
@@ -210,27 +239,39 @@ def format_result_in_apic_standard(result):
     }
     
     return {
-        "totalCount": '1',
+        "totalCount": str(len(results_list)),
         "imdata": [tenant_wrapper]
     }
 
+
 def save_to_json(file_path, data):
-    """Save the given data to a JSON file at the specified file path."""
+    """
+    Save the given data to a JSON file at the specified file path.
+    
+    Args:
+        file_path (str): The path where the JSON file should be saved.
+        data (dict): The data to be saved as JSON.
+    """
     with open(file_path, 'w') as json_file:
         json.dump(data, json_file, indent=2)
 
+
 if __name__ == "__main__":
-    # Parse the JSON file
-    with open(r'C:\Users\dsu979\Documents\APIC\APIC_Parser\tn-Datacenter1.json', 'rb') as file:
-        parser = ijson.parse(file)
-        nested_object = build_nested_object(parser)
+    # Example usage when running the module directly
+    import os
+    
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    file_path = os.path.join(base_dir, 'tn-Datacenter1.json')
+    
+    nested_object = build_nested_object(file_path)
 
-        #Save this content
-        # save_to_json(r'C:\Users\dsu979\Documents\APIC\APIC_Parser\nested_object.json', nested_object)
+    # Optional: Save the parsed object to nested_object.json
+    # save_to_json(os.path.join(base_dir, 'nested_object.json'), nested_object)
 
-        # Get the top-level objects
-        top_level_objects = get_top_level_objects(nested_object)
-        for child in top_level_objects:
-            for key, value in child.items():
+    # Get the top-level objects
+    top_level_objects = get_top_level_objects(nested_object)
+    for child in top_level_objects:
+        for key, value in child.items():
+            if key != "children":
                 print(f"Object: {key}, Name: {value}")
 
