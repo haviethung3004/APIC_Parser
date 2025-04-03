@@ -256,6 +256,42 @@ def save_to_json(file_path, data):
         json.dump(data, json_file, indent=2)
 
 
+def set_object_status(results, object_names, status_type):
+    """
+    Set the status attribute for specific objects in the results.
+    
+    Args:
+        results (dict): The formatted APIC results dictionary
+        object_names (list): List of object names to update (e.g., ['BD_484', 'BD_721'])
+        status_type (str): Status to set - either 'create' or 'delete'
+        
+    Returns:
+        dict: Updated results with status attributes set
+    """
+    if not results or "imdata" not in results or not results["imdata"]:
+        return results
+        
+    status_value = "deleted" if status_type == "delete" else "created,modified"
+    names_set = set(object_names)
+    
+    # Loop through each tenant
+    for tenant in results["imdata"]:
+        if "fvTenant" in tenant and "children" in tenant["fvTenant"]:
+            # Loop through each child object in the tenant
+            for child in tenant["fvTenant"]["children"]:
+                # Get the first key (object type)
+                for obj_type, obj_data in child.items():
+                    # Check if this is an object we want to update
+                    if "attributes" in obj_data and "name" in obj_data["attributes"]:
+                        obj_name = obj_data["attributes"]["name"]
+                        if obj_name in names_set:
+                            # Set the status attribute
+                            obj_data["attributes"]["status"] = status_value
+                            print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                            
+    return results
+
+
 if __name__ == "__main__":
     # Example usage when running the module directly
     import os

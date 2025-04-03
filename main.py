@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 APIC Parser - A tool for parsing and searching APIC JSON configuration files.
 
@@ -14,7 +15,8 @@ from apic_parser.apic_parser import (
     find_object_by_name_iterative,
     find_all_objects_by_name_iterative, 
     save_to_json, 
-    format_result_in_apic_standard
+    format_result_in_apic_standard,
+    set_object_status
 )
 
 
@@ -57,6 +59,11 @@ def parse_arguments():
         '--output-file',
         help='Save the found object(s) to this file path'
     )
+    parser.add_argument(
+        '--set-status',
+        choices=['create', 'delete'],
+        help='Set status for the found objects (create: "created,modified", delete: "deleted")'
+    )
     
     return parser.parse_args()
 
@@ -76,7 +83,7 @@ def display_top_level_objects(data):
                 print(f"Object Type: {key}, Name: {value}")
 
 
-def find_objects(data, object_type, object_name_input, output_file=None):
+def find_objects(data, object_type, object_name_input, output_file=None, status=None):
     """
     Find objects by type and name(s) in the parsed APIC data.
     
@@ -85,6 +92,7 @@ def find_objects(data, object_type, object_name_input, output_file=None):
         object_type (str): Type of object to find (e.g., "fvBD")
         object_name_input (str): Name or comma-separated names to find
         output_file (str, optional): Path to save the results
+        status (str, optional): Status to set - either 'create' or 'delete'
     
     Returns:
         bool: True if objects were found, False otherwise
@@ -99,6 +107,12 @@ def find_objects(data, object_type, object_name_input, output_file=None):
         
         if results:
             print(f"Found {len(results)} object(s) of type '{object_type}'")
+            
+            # Set status if requested
+            if status:
+                formatted_results = set_object_status(formatted_results, object_names, status)
+                print(f"Status set to '{status}' for specified objects")
+            
             if output_file:
                 save_to_json(output_file, formatted_results)
                 print(f"Objects saved to {output_file}")
@@ -116,6 +130,12 @@ def find_objects(data, object_type, object_name_input, output_file=None):
         
         if result:
             print(f"Found object of type '{object_type}' with name '{object_name}'")
+            
+            # Set status if requested
+            if status:
+                formatted_result = set_object_status(formatted_result, [object_name], status)
+                print(f"Status set to '{status}' for {object_name}")
+            
             if output_file:
                 save_to_json(output_file, formatted_result)
                 print(f"Object saved to {output_file}")
@@ -156,7 +176,7 @@ def main():
         if not args.object_type or not args.object_name:
             print("Error: To find an object, you must provide both --object-type and --object-name")
         else:
-            find_objects(parser, args.object_type, args.object_name, args.output_file)
+            find_objects(parser, args.object_type, args.object_name, args.output_file, args.set_status)
             action_performed = True
     
     # If no specific action was requested, show usage help
