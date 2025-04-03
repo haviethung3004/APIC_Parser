@@ -62,9 +62,25 @@ def display_top_level_objects_table(data):
             if key != "children":
                 table_data.append({"Object Type": key, "Name": value})
     
-    # Create and display the table
+    # Create DataFrame
     df = pd.DataFrame(table_data)
-    st.dataframe(df, use_container_width=True)
+    
+    # Display the table with improved formatting
+    st.dataframe(
+        df,
+        column_config={
+            "Object Type": st.column_config.TextColumn(
+                "Object Type",
+                help="Type of APIC object"
+            ),
+            "Name": st.column_config.TextColumn(
+                "Name",
+                help="Name of the object"
+            ),
+        },
+        hide_index=True,
+        use_container_width=True
+    )
 
 def search_objects(data, object_type, object_names, status_type=None):
     """Search for objects by type and names"""
@@ -90,6 +106,30 @@ def search_objects(data, object_type, object_names, status_type=None):
             formatted_results = set_object_status(formatted_results, names_list, status_type)
         
     return formatted_results if results else None
+
+def get_available_object_types(data):
+    """Get a list of all available object types from the data"""
+    top_level = get_top_level_objects(data)
+    object_types = []
+    
+    for obj in top_level:
+        for key in obj.keys():
+            if key != "children" and key not in object_types:
+                object_types.append(key)
+    
+    return sorted(object_types)
+
+def get_object_names_by_type(data, object_type):
+    """Get all object names of a specific type"""
+    top_level = get_top_level_objects(data)
+    names = []
+    
+    for obj in top_level:
+        for key, value in obj.items():
+            if key == object_type and value is not None:
+                names.append(value)
+    
+    return sorted(names)
 
 # Main app structure
 def main():
@@ -118,14 +158,15 @@ def main():
         st.markdown("### 📋 Instructions")
         st.markdown("""
         1. Upload an APIC JSON file
-        2. View top-level objects
-        3. Search for specific objects
+        2. View top-level objects in the Overview tab
+        3. Use the Search tab to find and modify objects
         4. Set status (create/delete) if needed
         5. View and download results
         """)
     
     # Main content area - Tabs
     if 'file_processed' in st.session_state and st.session_state.file_processed:
+        # Use session state to control active tab
         tab1, tab2, tab3 = st.tabs(["📊 Overview", "🔍 Search", "ℹ️ About"])
         
         # Tab 1: Overview
@@ -142,11 +183,34 @@ def main():
         with tab2:
             st.header("Search for Objects")
             
+            # Get available object types for dropdown
+            object_types = [""] + get_available_object_types(st.session_state.parsed_data)
+            
             col1, col2 = st.columns([1, 2])
+            
             with col1:
-                object_type = st.text_input("Object Type (e.g., fvBD)", placeholder="fvBD")
+                # Use dropdown with available types
+                object_type = st.selectbox(
+                    "Object Type",
+                    options=object_types,
+                    index=0
+                )
+            
             with col2:
-                object_names = st.text_input("Object Name(s)", placeholder="BD_484 or BD_484,BD_721", help="For multiple objects, separate with commas")
+                # If an object type is selected, get names for that type and show as a multiselect
+                if object_type:
+                    object_names_list = get_object_names_by_type(st.session_state.parsed_data, object_type)
+                    selected_names = st.multiselect(
+                        "Select Object Name(s)",
+                        options=object_names_list,
+                        help="You can select multiple objects of the same type"
+                    )
+                    
+                    # Convert selected names to comma-separated string for the search function
+                    object_names = ",".join(selected_names) if selected_names else ""
+                else:
+                    object_names = ""
+                    st.text("Please select an Object Type first")
             
             # Status setting options
             status_col1, status_col2 = st.columns([1, 2])
@@ -163,7 +227,7 @@ def main():
                 else:
                     status_type = None
             
-            search_clicked = st.button("🔍 Search", type="primary")
+            search_clicked = st.button("🔍 Search", type="primary", disabled=not (object_type and object_names))
             
             if search_clicked and object_type and object_names:
                 results = search_objects(st.session_state.parsed_data, object_type, object_names, status_type if set_status else None)
