@@ -38,6 +38,37 @@ def build_nested_object(parser):
                     parent.append(value)
     return result
 
+def get_top_level_objects(data):
+    """
+    Get the top-level objects from the tenant data
+    """
+    top_level = []
+    try:
+        for item in data["imdata"]:
+            if "fvTenant" in item:
+                children = item["fvTenant"].get("children", [])
+                for child in children:
+                    for key, value in child.items():
+                        if key not in top_level:
+                            top_level.append({
+                                key: value.get("attributes", {}).get("name", None),
+                                "children": [None if "children" not in value else "[]"]
+                            })
+    except KeyError:
+        return []
+    return top_level
+
+def has_nested_children(obj):
+    """
+    Check if the object has nested children
+    """
+    for key, value in obj.items():
+        if isinstance(value, dict) and "children" in value:
+            return True, value["children"]
+    return False, None
+
+
+
 def find_object_by_name_iterative(data, object_type, name):
     """
     Find an object by its type (e.g., 'fvBD') and name (e.g., 'BD_484') using an iterative stack-based approach.
@@ -65,15 +96,23 @@ def find_object_by_name_iterative(data, object_type, name):
     
     return None  # Not found
 
+def save_to_json(file_path, data):
+    """Save the given data to a JSON file at the specified file path."""
+    with open(file_path, 'w') as json_file:
+        json.dump(data, json_file, indent=2)
+
 if __name__ == "__main__":
     # Parse the JSON file
     with open(r'C:\Users\dsu979\Documents\APIC\APIC_Parser\tn-Datacenter1.json', 'rb') as file:
         parser = ijson.parse(file)
         nested_object = build_nested_object(parser)
 
-    # Find the specific fvBD object with name "BD_484"
-    target_object = find_object_by_name_iterative(nested_object, "fvAp", "BD_484")
-    if target_object:
-        print(json.dumps(target_object, indent=2))
-    else:
-        print(f"Object 'fvBD' with name 'BD_484' not found.")
+        #Save this content
+        # save_to_json(r'C:\Users\dsu979\Documents\APIC\APIC_Parser\nested_object.json', nested_object)
+
+        # Get the top-level objects
+        top_level_objects = get_top_level_objects(nested_object)
+        for child in top_level_objects:
+            for key, value in child.items():
+                print(f"Object: {key}, Name: {value}")
+
