@@ -1,0 +1,33 @@
+# Use a recent version of the Compose file format
+version: '3.8'
+
+services:
+  # Define your application service, you can name it anything (e.g., 'app', 'streamlit-app')
+  apic_app:
+    # Tell Compose to build the image from the Dockerfile in the current directory (.)
+    build: .
+    # Define port mappings: map port 8501 on your host machine to port 8501 in the container
+    ports:
+      - "8501:8501"
+    # Define volumes to mount data or code if needed
+    volumes:
+      - ./data:/app/data # Mount a local 'data' folder into '/app/data' inside container
+      - ./logs:/app/logs # Mount logs directory to persist logs from container
+    
+    # Configure logging for the container
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # Limit log file size to 10MB
+        max-file: "3"     # Keep up to 3 rotated log files
+    
+    # Optional: Set environment variables if needed
+    environment:
+      - PYTHONUNBUFFERED=1  # Ensure Python output is not buffered, for real-time logs
+
+    # Healthcheck to monitor the container's status (optional)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

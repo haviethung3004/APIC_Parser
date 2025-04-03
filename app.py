@@ -14,6 +14,8 @@ import json
 import os
 import tempfile
 import pandas as pd
+import logging
+import sys
 from apic_parser.apic_parser import (
     build_nested_object,
     get_top_level_objects,
@@ -26,6 +28,41 @@ from apic_parser.apic_parser import (
     set_status_for_nested_objects,
     get_ap_and_epg_names
 )
+
+# Configure logging
+def setup_logging():
+    """Configure logging for the application"""
+    # Create logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Create console handler and set level
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    
+    # Add handler to logger
+    logger.addHandler(console_handler)
+    
+    # Also create a file handler for persistent logs
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.FileHandler(os.path.join(log_dir, 'apic_parser.log'))
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        print(f"Could not create log file: {e}")
+    
+    return logger
+
+# Set up logging at the start of the application
+logger = setup_logging()
+logger.info("Starting APIC Parser application")
 
 # Set page configuration
 st.set_page_config(
@@ -43,10 +80,12 @@ def process_uploaded_file(uploaded_file):
         tmp_file_path = tmp_file.name
     
     try:
+        logger.info(f"Processing uploaded file: {uploaded_file.name}")
         parsed_data = build_nested_object(tmp_file_path)
         os.unlink(tmp_file_path)  # Clean up the temp file
         return parsed_data
     except Exception as e:
+        logger.error(f"Error parsing the uploaded file: {e}")
         os.unlink(tmp_file_path)  # Clean up the temp file
         st.error(f"Error parsing the uploaded file: {e}")
         return None
@@ -89,6 +128,7 @@ def display_top_level_objects_table(data):
 def search_objects(data, object_type, object_names, status_type=None):
     """Search for objects by type and names"""
     if not object_type or not object_names:
+        logger.warning("Search attempted without providing both object type and name(s)")
         st.warning("Please provide both object type and name(s).")
         return None
     
@@ -96,6 +136,7 @@ def search_objects(data, object_type, object_names, status_type=None):
     names_list = [name.strip() for name in object_names.split(',')]
     
     with st.spinner(f"Searching for objects of type '{object_type}'..."):
+        logger.info(f"Searching for object type '{object_type}' with names: {names_list}")
         if len(names_list) > 1:
             results = find_all_objects_by_name_iterative(data, object_type, names_list)
         else:
@@ -107,6 +148,7 @@ def search_objects(data, object_type, object_names, status_type=None):
         
         # Apply status if requested
         if status_type and formatted_results and formatted_results["totalCount"] != "0":
+            logger.info(f"Setting status '{status_type}' for found objects")
             formatted_results = set_object_status(formatted_results, names_list, status_type)
         
     return formatted_results if results else None
@@ -125,10 +167,12 @@ def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None, 
         The formatted results with updated status
     """
     if not ap_name:
+        logger.warning("Search for Application Profile attempted without providing a name")
         st.warning("Please provide an Application Profile name.")
         return None
     
     with st.spinner(f"Searching for Application Profile '{ap_name}'..."):
+        logger.info(f"Searching for Application Profile: {ap_name}")
         result = find_ap_and_children_by_name(data, ap_name)
         
         # Format results in APIC standard format
@@ -137,6 +181,7 @@ def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None, 
         # Apply status to AP and nested objects if requested
         if status_type and formatted_results and formatted_results["totalCount"] != "0":
             if nested_paths:
+                logger.info(f"Setting status '{status_type}' for nested objects in paths: {nested_paths}")
                 # If only_update_nested is True, filter out the AP path if present
                 if only_update_nested:
                     nested_paths = [p for p in nested_paths if not p.startswith(f"fvAp:{ap_name}$")]
@@ -144,6 +189,7 @@ def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None, 
                 formatted_results = set_status_for_nested_objects(formatted_results, nested_paths, status_type)
             else:
                 # Just set status on the AP itself
+                logger.info(f"Setting status '{status_type}' for Application Profile: {ap_name}")
                 formatted_results = set_object_status(formatted_results, [ap_name], status_type)
     
     return formatted_results if result else None
@@ -174,6 +220,10 @@ def get_object_names_by_type(data, object_type):
 
 # Main app structure
 def main():
+    # Log application startup with environment details
+    logger.info(f"Environment: Python {sys.version}")
+    logger.info(f"Working directory: {os.getcwd()}")
+    
     # Header with icon
     st.title("🌐 APIC Parser")
     st.markdown("### A tool for parsing and searching Cisco ACI APIC JSON configuration files")

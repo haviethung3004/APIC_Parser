@@ -12,16 +12,21 @@ APIC Parser is a Python-based tool for parsing and searching through Cisco ACI A
 - Output results in the standard APIC JSON format
 - Save search results to files
 - User-friendly web interface with Streamlit
+- Docker support for easy deployment and consistency across environments
+- Comprehensive logging for real-time monitoring and troubleshooting
 
 ## Prerequisites
 
-- Python 3.6+
+- Python 3.6+ (3.11 recommended)
 - Required libraries:
   - ijson (for streaming JSON parsing)
   - streamlit (for the web interface)
   - pandas (for data display in the web interface)
+- Docker (optional, for containerized deployment)
 
 ## Installation
+
+### Standard Installation
 
 1. Clone this repository or download the source code
 2. Install the required dependencies:
@@ -29,6 +34,20 @@ APIC Parser is a Python-based tool for parsing and searching through Cisco ACI A
 ```bash
 pip install -r requirements.txt
 ```
+
+### Docker Installation
+
+The project supports Docker for easy deployment:
+
+1. Make sure you have Docker and Docker Compose installed on your system
+2. Clone this repository or download the source code
+3. Run the application using Docker Compose:
+
+```bash
+docker-compose up
+```
+
+This will build the Docker image and start the application on port 8501.
 
 ## Usage
 
@@ -98,6 +117,14 @@ The project includes a user-friendly web interface built with Streamlit.
 streamlit run app.py
 ```
 
+Or when using Docker:
+
+```bash
+docker-compose up
+```
+
+Then access the web interface at http://localhost:8501
+
 #### Using the Web App
 
 1. Upload an APIC JSON file using the sidebar
@@ -166,11 +193,53 @@ APIC_Parser/
 ├── apic_parser/
 │   └── apic_parser.py       # Core parsing and search functionality
 ├── requirements.txt         # Dependencies for the project
+├── Dockerfile               # Docker configuration for containerization
+├── docker-compose.yaml      # Docker Compose configuration for easy deployment
 ├── README.md                # Documentation
 ├── nested_object.json       # Cached parsed JSON data (optional)
 ├── result.json              # Example output file
+├── data/                    # Data directory mounted to the Docker container
 └── tn-Datacenter1.json      # Example APIC configuration file
 ```
+
+## Docker Configuration
+
+The project includes Docker support for easy deployment:
+
+- **Dockerfile**: Uses Python 3.11 slim image and configures the Streamlit application
+- **docker-compose.yaml**: Defines the service, builds the image, maps port 8501, and mounts the data and logs volumes
+- **Volume mounting**: 
+  - The `/data` directory is mounted to the container, allowing you to easily provide input files
+  - The `/logs` directory is mounted to store persistent application logs
+
+### Data Files with Docker
+
+When using Docker, place your APIC JSON configuration files in the `./data` directory. These files will be accessible to the application inside the container at `/app/data`.
+
+### Logging and Monitoring
+
+The application includes comprehensive logging that helps you monitor operations in real-time:
+
+- **Log Files**: All application logs are written to the `./logs` directory and are accessible even after the container stops
+- **Real-time Logs**: When running with docker-compose, you can see real-time logs directly in your terminal
+- **Log Levels**: Different severity levels (INFO, WARNING, ERROR) help you identify important messages
+- **Docker Log Configuration**: Docker is configured to maintain log history with file rotation
+
+#### Viewing Logs
+
+To see real-time logs while the container is running:
+
+```bash
+docker-compose up
+```
+
+To view logs from a running container in the background:
+
+```bash
+docker-compose logs -f
+```
+
+Logs are also available in the `./logs` directory, which is mounted as a volume from the container.
 
 ## How It Works
 

@@ -1,7 +1,10 @@
 import ijson
 import json
 import os
+import logging
 
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 
 def build_nested_object(file_path):
@@ -14,6 +17,7 @@ def build_nested_object(file_path):
     Returns:
         dict: The parsed nested object representation of the JSON file.
     """
+    logger.info(f"Parsing file: {file_path}")
     with open(file_path, 'rb') as file:
         parser = ijson.parse(file)
         stack = []
@@ -50,6 +54,7 @@ def build_nested_object(file_path):
                         parent[key] = value
                     elif isinstance(parent, list):
                         parent.append(value)
+        logger.info(f"Successfully parsed file: {file_path}")
         return result
 
 
@@ -101,7 +106,7 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
     # Make the names_list a set for potentially faster 'in' checks, especially with many names
     names_set = set(names_list)
     
-    print(f"Searching for objects of type '{object_type}' with names: {', '.join(names_list)}")
+    logger.info(f"Searching for objects of type '{object_type}' with names: {', '.join(names_list)}")
 
     while stack:
         current_obj, _ = stack.pop()
@@ -112,7 +117,7 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
                     # Check if name is in the list/set of requested names
                     object_actual_name = value.get("attributes", {}).get("name")
                     if object_actual_name is not None and object_actual_name in names_set:
-                        print(f"  -> Found a match: '{object_actual_name}'")
+                        logger.debug(f"Found a match: '{object_actual_name}'")
                         found_objects.append({key: value})
                         # Continue searching for other matches
 
@@ -125,7 +130,7 @@ def find_all_objects_by_name_iterative(data, object_type, names_list):
                 if isinstance(item, (dict, list)):
                     stack.append((item, None))
 
-    print(f"Found {len(found_objects)} matching object(s).")
+    logger.info(f"Found {len(found_objects)} matching object(s).")
     return found_objects
 
 
@@ -144,7 +149,7 @@ def find_object_by_name_iterative(data, object_type, name):
     # Stack holds tuples of (object, key) to explore
     stack = [(data, None)]  # Start with the root object, no key yet
     
-    print(f"Searching for object of type '{object_type}' with name '{name}'")
+    logger.info(f"Searching for object of type '{object_type}' with name '{name}'")
     
     while stack:
         current_obj, parent_key = stack.pop()  # Get the next object to check
@@ -154,7 +159,7 @@ def find_object_by_name_iterative(data, object_type, name):
                 # Check if this is the target object
                 if key == object_type and "attributes" in value:
                     if value["attributes"].get("name") == name:
-                        print(f"  -> Found a match: '{name}'")
+                        logger.debug(f"Found a match: '{name}'")
                         return {key: value}  # Found it, return the full object
                 # Add nested dictionaries to the stack
                 if isinstance(value, (dict, list)):
@@ -166,7 +171,7 @@ def find_object_by_name_iterative(data, object_type, name):
                 if isinstance(item, (dict, list)):
                     stack.append((item, None))  # No key for list items
     
-    print(f"No object of type '{object_type}' with name '{name}' found.")
+    logger.info(f"No object of type '{object_type}' with name '{name}' found.")
     return None  # Not found
 
 
@@ -193,7 +198,7 @@ def get_tenant_info():
                     tenant_info = original_data["imdata"][0]["fvTenant"]["attributes"]
                     return tenant_info
     except Exception as e:
-        print(f"Warning: Could not extract tenant information from nested_object.json: {e}")
+        logger.warning(f"Could not extract tenant information from nested_object.json: {e}")
     
     return default_tenant_info
 
@@ -287,7 +292,7 @@ def set_object_status(results, object_names, status_type):
                         if obj_name in names_set:
                             # Set the status attribute
                             obj_data["attributes"]["status"] = status_value
-                            print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                            logger.info(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
                             
     return results
 
@@ -306,7 +311,7 @@ def find_ap_and_children_by_name(data, ap_name):
     # Stack holds tuples of (object, key) to explore
     stack = [(data, None)]  # Start with the root object, no key yet
     
-    print(f"Searching for Application Profile with name '{ap_name}'")
+    logger.info(f"Searching for Application Profile with name '{ap_name}'")
     
     while stack:
         current_obj, parent_key = stack.pop()  # Get the next object to check
@@ -316,7 +321,7 @@ def find_ap_and_children_by_name(data, ap_name):
                 # Check if this is an Application Profile
                 if key == "fvAp" and "attributes" in value:
                     if value["attributes"].get("name") == ap_name:
-                        print(f"  -> Found Application Profile: '{ap_name}'")
+                        logger.debug(f"Found Application Profile: '{ap_name}'")
                         return {key: value}  # Found it, return the full object with children
                 # Add nested dictionaries to the stack
                 if isinstance(value, (dict, list)):
@@ -328,7 +333,7 @@ def find_ap_and_children_by_name(data, ap_name):
                 if isinstance(item, (dict, list)):
                     stack.append((item, None))  # No key for list items
     
-    print(f"No Application Profile with name '{ap_name}' found.")
+    logger.info(f"No Application Profile with name '{ap_name}' found.")
     return None  # Not found
 
 
@@ -408,7 +413,7 @@ def set_status_for_nested_objects(results, object_paths, status_type):
                             if child[obj_type]["attributes"].get("name") == obj_name:
                                 # Set status on the top-level object
                                 child[obj_type]["attributes"]["status"] = status_value
-                                print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                                logger.info(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
                                 break
             
             # Then process all nested paths
@@ -453,7 +458,7 @@ def _process_nested_path_only(children, path_parts, status_value):
                 if child[obj_type]["attributes"].get("name") == obj_name:
                     # Set status on this object
                     child[obj_type]["attributes"]["status"] = status_value
-                    print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                    logger.info(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
                     
                     # Continue with next level if exists
                     if len(path_parts) > 1 and "children" in child[obj_type]:
@@ -507,6 +512,12 @@ def get_ap_and_epg_names(data):
 
 
 if __name__ == "__main__":
+    # Setup logging when running this module directly
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     # Example usage when running the module directly
     import os
     
@@ -523,5 +534,5 @@ if __name__ == "__main__":
     for child in top_level_objects:
         for key, value in child.items():
             if key != "children":
-                print(f"Object: {key}, Name: {value}")
+                logger.info(f"Object: {key}, Name: {value}")
 

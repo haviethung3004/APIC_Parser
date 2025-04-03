@@ -1,0 +1,39 @@
+# Ignore the Python virtual environment directory
+.venv/
+venv/
+env/
+
+# Ignore Git directory (if using Git)
+.git/
+
+# Ignore Python cache files and artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Ignore large data/example/output JSON files
+# (These should be mounted using volumes at runtime, not copied into the image)
+nested_object.json
+result.json
+Testing.json
+tn-Datacenter1.json
+# Add any other specific large data files if needed:
+# *.log
+# data/
+
+# Ignore documentation / config files not needed in the image
+README.md
+.gitignore
+
+# Ignore the Dockerfile itself from being copied by COPY . .
+Dockerfile
+
+# Ignore IDE/editor specific folders
+.vscode/
+.idea/
+
+# Ignore other OS-specific or temporary files if applicable
+*.swp
+*~
