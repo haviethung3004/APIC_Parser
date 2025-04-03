@@ -20,7 +20,11 @@ from apic_parser.apic_parser import (
     find_object_by_name_iterative,
     find_all_objects_by_name_iterative,
     format_result_in_apic_standard,
-    set_object_status
+    set_object_status,
+    find_ap_and_children_by_name,
+    get_nested_epgs_from_ap,
+    set_status_for_nested_objects,
+    get_ap_and_epg_names
 )
 
 # Set page configuration
@@ -107,6 +111,28 @@ def search_objects(data, object_type, object_names, status_type=None):
         
     return formatted_results if results else None
 
+def search_ap_with_children(data, ap_name, status_type=None, nested_paths=None):
+    """Search for Application Profile with all its nested children"""
+    if not ap_name:
+        st.warning("Please provide an Application Profile name.")
+        return None
+    
+    with st.spinner(f"Searching for Application Profile '{ap_name}'..."):
+        result = find_ap_and_children_by_name(data, ap_name)
+        
+        # Format results in APIC standard format
+        formatted_results = format_result_in_apic_standard(result)
+        
+        # Apply status to AP and nested objects if requested
+        if status_type and formatted_results and formatted_results["totalCount"] != "0":
+            if nested_paths:
+                formatted_results = set_status_for_nested_objects(formatted_results, nested_paths, status_type)
+            else:
+                # Just set status on the AP itself
+                formatted_results = set_object_status(formatted_results, [ap_name], status_type)
+    
+    return formatted_results if result else None
+
 def get_available_object_types(data):
     """Get a list of all available object types from the data"""
     top_level = get_top_level_objects(data)
@@ -160,14 +186,15 @@ def main():
         1. Upload an APIC JSON file
         2. View top-level objects in the Overview tab
         3. Use the Search tab to find and modify objects
-        4. Set status (create/delete) if needed
-        5. View and download results
+        4. Use the Application Profiles tab for nested objects
+        5. Set status (create/delete) for objects at any level
+        6. View and download results
         """)
     
     # Main content area - Tabs
     if 'file_processed' in st.session_state and st.session_state.file_processed:
         # Use session state to control active tab
-        tab1, tab2, tab3 = st.tabs(["📊 Overview", "🔍 Search", "ℹ️ About"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🔍 Search", "🌳 Application Profiles", "ℹ️ About"])
         
         # Tab 1: Overview
         with tab1:
@@ -215,14 +242,15 @@ def main():
             # Status setting options
             status_col1, status_col2 = st.columns([1, 2])
             with status_col1:
-                set_status = st.checkbox("Set Status", help="Set status for found objects")
+                set_status = st.checkbox("Set Status", help="Set status for found objects", key="search_set_status")
             with status_col2:
                 if set_status:
                     status_type = st.radio(
                         "Status Type", 
                         ["create", "delete"], 
                         horizontal=True,
-                        help="'create' sets status to 'created,modified', 'delete' sets status to 'deleted'"
+                        help="'create' sets status to 'created,modified', 'delete' sets status to 'deleted'",
+                        key="search_status_type"
                     )
                 else:
                     status_type = None
@@ -254,8 +282,125 @@ def main():
                 else:
                     st.error(f"No objects found matching the criteria.")
         
-        # Tab 3: About
+        # Tab 3: Application Profiles
         with tab3:
+            st.header("Browse Application Profiles and EPGs")
+            st.info("This tab helps you work with nested objects like Application Profiles (fvAp) and their EPGs (fvAEPg)")
+            
+            # Get all Application Profiles and their EPGs
+            with st.spinner("Loading Application Profiles and EPGs..."):
+                ap_epg_dict = get_ap_and_epg_names(st.session_state.parsed_data)
+            
+            if not ap_epg_dict:
+                st.warning("No Application Profiles found in the configuration.")
+            else:
+                # Show Application Profiles in a dropdown
+                ap_names = list(ap_epg_dict.keys())
+                selected_ap = st.selectbox("Select Application Profile", options=[""] + ap_names)
+                
+                if selected_ap:
+                    # Show EPGs for the selected AP
+                    st.subheader(f"EPGs in {selected_ap}")
+                    epgs = ap_epg_dict[selected_ap]
+                    
+                    if not epgs:
+                        st.info(f"No EPGs found in Application Profile '{selected_ap}'")
+                    else:
+                        # Display EPGs in a table
+                        epg_df = pd.DataFrame({"EPG Name": epgs})
+                        st.dataframe(
+                            epg_df,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        # Allow selection of EPGs
+                        selected_epgs = st.multiselect(
+                            "Select EPGs to include in status update", 
+                            options=epgs
+                        )
+                        
+                        # Status setting options for nested objects
+                        st.subheader("Set Status for Objects")
+                        
+                        status_options = st.columns(3)
+                        with status_options[0]:
+                            set_ap_status = st.checkbox("Set AP Status", help="Set status for the Application Profile", key="ap_set_status")
+                        
+                        with status_options[1]:
+                            set_epg_status = st.checkbox("Set EPG Status", help="Set status for selected EPGs", key="epg_set_status")
+                            
+                        with status_options[2]:
+                            status_type = st.radio(
+                                "Status Type", 
+                                ["create", "delete"], 
+                                horizontal=True,
+                                help="'create' sets status to 'created,modified', 'delete' sets status to 'deleted'",
+                                key="ap_status_type"
+                            )
+                        
+                        # Button to retrieve AP with status updates
+                        retrieve_button = st.button(
+                            "📋 Retrieve with Status Updates", 
+                            type="primary",
+                            disabled=not (selected_ap and (set_ap_status or (set_epg_status and selected_epgs)))
+                        )
+                        
+                        if retrieve_button:
+                            # Build paths for status updates
+                            object_paths = []
+                            
+                            if set_ap_status:
+                                object_paths.append(f"fvAp:{selected_ap}")
+                                
+                            if set_epg_status and selected_epgs:
+                                for epg in selected_epgs:
+                                    object_paths.append(f"fvAp:{selected_ap}/fvAEPg:{epg}")
+                            
+                            # Retrieve AP with nested children and set status
+                            with st.spinner(f"Retrieving Application Profile '{selected_ap}' and updating status..."):
+                                results = search_ap_with_children(
+                                    st.session_state.parsed_data,
+                                    selected_ap,
+                                    status_type=status_type if (set_ap_status or set_epg_status) else None,
+                                    nested_paths=object_paths
+                                )
+                                
+                                if results:
+                                    # Show what objects had status set
+                                    if set_ap_status or set_epg_status:
+                                        status_value = "deleted" if status_type == "delete" else "created,modified"
+                                        objects_updated = []
+                                        
+                                        if set_ap_status:
+                                            objects_updated.append(f"Application Profile '{selected_ap}'")
+                                            
+                                        if set_epg_status and selected_epgs:
+                                            for epg in selected_epgs:
+                                                objects_updated.append(f"EPG '{epg}'")
+                                        
+                                        st.success(f"Status set to '{status_value}' for {len(objects_updated)} object(s)")
+                                        st.write("Updated objects:")
+                                        for obj in objects_updated:
+                                            st.write(f"- {obj}")
+                                    
+                                    # Show results
+                                    with st.expander("View Results", expanded=True):
+                                        st.json(results)
+                                    
+                                    # Download button for results
+                                    result_json = json.dumps(results, indent=2)
+                                    st.download_button(
+                                        label="📥 Download Results",
+                                        data=result_json,
+                                        file_name=f"ap_{selected_ap}_with_status.json",
+                                        mime="application/json"
+                                    )
+                                else:
+                                    st.error(f"Failed to retrieve Application Profile '{selected_ap}'")
+        
+        # Tab 4: About
+        with tab4:
             st.header("About APIC Parser")
             st.markdown("""
             **APIC Parser** is a tool for parsing and searching through Cisco ACI APIC (Application Policy Infrastructure Controller) JSON configuration files.
@@ -265,7 +410,8 @@ def main():
             - Extract top-level objects from the tenant configuration
             - Search for specific objects by type and name
             - Search for multiple objects in a single command
-            - Set object status (create or delete)
+            - Browse and modify Application Profiles with nested EPGs
+            - Set status attributes for objects at any level in the hierarchy
             - Output results in the standard APIC JSON format
             
             ### How It Works
@@ -273,6 +419,7 @@ def main():
             2. When searching for objects, the tool traverses the parsed data structure using an iterative depth-first search approach
             3. Results are wrapped in the standard APIC format, preserving the tenant structure and attributes
             4. Status can be set to either 'created,modified' or 'deleted' as required by APIC
+            5. Hierarchical object relationships are preserved when browsing Application Profiles and EPGs
             """)
     else:
         # Display welcome message when no file is uploaded yet
@@ -284,9 +431,10 @@ def main():
         1. Upload an APIC JSON file using the sidebar
         2. The app will automatically parse the file
         3. You can then explore the structure and search for specific objects
-        4. Set status (create/delete) for objects if needed
+        4. Browse Application Profiles and their nested EPGs
+        5. Set status (create/delete) for objects at any level
         
-        📌 **Example search types:**
+        📌 **Example object types:**
         - Bridge Domains: `fvBD`
         - Application Profiles: `fvAp`
         - EPGs: `fvAEPg`

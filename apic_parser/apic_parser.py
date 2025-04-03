@@ -292,6 +292,195 @@ def set_object_status(results, object_names, status_type):
     return results
 
 
+def find_ap_and_children_by_name(data, ap_name):
+    """
+    Find an Application Profile (fvAp) by name along with all its nested children structure.
+    
+    Args:
+        data (dict): The nested dictionary/list structure to search within.
+        ap_name (str): The name of the Application Profile to find.
+        
+    Returns:
+        dict: The found Application Profile with all its nested children, or None if not found.
+    """
+    # Stack holds tuples of (object, key) to explore
+    stack = [(data, None)]  # Start with the root object, no key yet
+    
+    print(f"Searching for Application Profile with name '{ap_name}'")
+    
+    while stack:
+        current_obj, parent_key = stack.pop()  # Get the next object to check
+        
+        if isinstance(current_obj, dict):
+            for key, value in current_obj.items():
+                # Check if this is an Application Profile
+                if key == "fvAp" and "attributes" in value:
+                    if value["attributes"].get("name") == ap_name:
+                        print(f"  -> Found Application Profile: '{ap_name}'")
+                        return {key: value}  # Found it, return the full object with children
+                # Add nested dictionaries to the stack
+                if isinstance(value, (dict, list)):
+                    stack.append((value, key))
+        
+        elif isinstance(current_obj, list):
+            # Add each item in the list to the stack
+            for item in current_obj:
+                if isinstance(item, (dict, list)):
+                    stack.append((item, None))  # No key for list items
+    
+    print(f"No Application Profile with name '{ap_name}' found.")
+    return None  # Not found
+
+
+def get_nested_epgs_from_ap(ap_data):
+    """
+    Extract all EPGs (fvAEPg) from an Application Profile structure.
+    
+    Args:
+        ap_data (dict): The Application Profile data structure with its children.
+        
+    Returns:
+        list: A list of dictionaries containing EPG objects.
+    """
+    epgs = []
+    
+    if not ap_data or "fvAp" not in ap_data:
+        return epgs
+        
+    # Navigate to the children of the AP
+    ap_children = ap_data["fvAp"].get("children", [])
+    
+    # Find all EPGs in the children
+    for child in ap_children:
+        if "fvAEPg" in child:
+            epgs.append(child)
+    
+    return epgs
+
+
+def set_status_for_nested_objects(results, object_paths, status_type):
+    """
+    Set the status attribute for specific objects in the results including nested objects.
+    Supports setting status for objects identified by paths like "fvAp:AppName/fvAEPg:EpgName"
+    
+    Args:
+        results (dict): The formatted APIC results dictionary
+        object_paths (list): List of object paths to update (e.g., ["fvAp:WebApp", "fvAp:WebApp/fvAEPg:WebEPG"])
+        status_type (str): Status to set - either 'create' or 'delete'
+        
+    Returns:
+        dict: Updated results with status attributes set on specified objects
+    """
+    if not results or "imdata" not in results or not results["imdata"]:
+        return results
+        
+    status_value = "deleted" if status_type == "delete" else "created,modified"
+    
+    # Process each object path
+    for path in object_paths:
+        path_parts = path.split("/")
+        
+        # Handle the root object (first part of the path)
+        if ":" in path_parts[0]:
+            obj_type, obj_name = path_parts[0].split(":")
+            
+            # Find the object in the tenant children
+            for tenant in results["imdata"]:
+                if "fvTenant" in tenant and "children" in tenant["fvTenant"]:
+                    tenant_children = tenant["fvTenant"]["children"]
+                    
+                    # Look for the root object
+                    for child in tenant_children:
+                        if obj_type in child and "attributes" in child[obj_type]:
+                            if child[obj_type]["attributes"].get("name") == obj_name:
+                                # Set status on the root object
+                                child[obj_type]["attributes"]["status"] = status_value
+                                print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                                
+                                # If there are nested paths, process them
+                                if len(path_parts) > 1 and "children" in child[obj_type]:
+                                    _process_nested_path(child[obj_type]["children"], path_parts[1:], status_value)
+                                
+                                break
+    
+    return results
+
+
+def _process_nested_path(children, path_parts, status_value):
+    """
+    Helper function to process nested paths for setting status attributes.
+    
+    Args:
+        children (list): The children array to search through
+        path_parts (list): Remaining parts of the object path
+        status_value (str): Status value to set
+    """
+    if not path_parts:
+        return
+        
+    # Get the current part to process
+    if ":" in path_parts[0]:
+        obj_type, obj_name = path_parts[0].split(":")
+        
+        # Look for the object in children
+        for child in children:
+            if obj_type in child and "attributes" in child[obj_type]:
+                if child[obj_type]["attributes"].get("name") == obj_name:
+                    # Set status on this object
+                    child[obj_type]["attributes"]["status"] = status_value
+                    print(f"Set status '{status_value}' for {obj_type} '{obj_name}'")
+                    
+                    # Continue with next level if exists
+                    if len(path_parts) > 1 and "children" in child[obj_type]:
+                        _process_nested_path(child[obj_type]["children"], path_parts[1:], status_value)
+                    
+                    break
+
+
+def get_ap_and_epg_names(data):
+    """
+    Get all Application Profiles and their EPGs from the data.
+    
+    Args:
+        data (dict): The nested object data structure
+        
+    Returns:
+        dict: A dictionary where keys are AP names and values are lists of their EPG names
+    """
+    ap_epg_dict = {}
+    stack = [(data, None)]
+    
+    while stack:
+        current_obj, _ = stack.pop()
+        
+        if isinstance(current_obj, dict):
+            # Check if this is an Application Profile
+            if "fvAp" in current_obj and "attributes" in current_obj["fvAp"]:
+                ap_name = current_obj["fvAp"]["attributes"].get("name")
+                if ap_name:
+                    ap_epg_dict[ap_name] = []
+                    
+                    # Look for EPGs in this AP's children
+                    if "children" in current_obj["fvAp"]:
+                        for child in current_obj["fvAp"]["children"]:
+                            if "fvAEPg" in child and "attributes" in child["fvAEPg"]:
+                                epg_name = child["fvAEPg"]["attributes"].get("name")
+                                if epg_name:
+                                    ap_epg_dict[ap_name].append(epg_name)
+            
+            # Continue searching deeper
+            for key, value in current_obj.items():
+                if isinstance(value, (dict, list)):
+                    stack.append((value, key))
+                    
+        elif isinstance(current_obj, list):
+            for item in current_obj:
+                if isinstance(item, (dict, list)):
+                    stack.append((item, None))
+    
+    return ap_epg_dict
+
+
 if __name__ == "__main__":
     # Example usage when running the module directly
     import os
